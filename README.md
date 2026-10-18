@@ -10,6 +10,7 @@ self-contained resource you can drop into `resources/`.
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/car` dev command |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
+| [`chat-tabcomplete`](chat-tabcomplete) | JavaScript (NUI) | Tab completion for the default chat |
 
 ## bank-cs
 

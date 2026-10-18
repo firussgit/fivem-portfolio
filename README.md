@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
@@ -77,6 +78,30 @@ Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`, `/loc
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
 
+## customs-cs
+
+Vehicle customisation with a live preview, where the server prices and saves everything.
+
+- **Preview is local, purchases are not.** Sliders change how the vehicle looks to the player
+  instantly; the server then prices the proposal. Nothing is charged or saved until the server
+  approves the purchase.
+- **The server reads the truth.** It never trusts the client's idea of what the vehicle already
+  has: it loads the saved mods from the database, prices only what actually changed (upgrades are
+  charged per level gained, downgrades are free) and validates every value against strict ranges.
+  A malformed or out-of-range mods string is rejected whole.
+- **Ownership enforced twice.** The player must be driving a real vehicle inside a customs bay
+  (position read on the server), and the save is `UPDATE ... WHERE plate = ? AND owner = ?`,
+  which only matches if they own it. If the save fails after the bank charge, the money is refunded.
+- **Loose coupling with the garage.** `garage-cs` stores the mods as an opaque string and announces
+  "a vehicle spawned" with it; `customs-cs` is the only part that knows what it means and applies it.
+  Customised vehicles keep their look every time they are taken out.
+- **Cross-resource discount.** A mechanic on duty (`jobs-cs`) pays 20% less; if `jobs-cs` isn't
+  running there is simply no discount.
+- Customisable: primary and secondary colour, window tint, engine / brakes / transmission levels, turbo.
+
+Commands: `/setcustoms` (admin) places a bay where you stand; drive in as the driver and press E.
+
+Requires `oxmysql`, `bank-cs` and `garage-cs`. Build with `./customs-cs/deploy.ps1`.
 ## needs-cs
 
 Hunger and thirst, built to react to other resources without depending on them.

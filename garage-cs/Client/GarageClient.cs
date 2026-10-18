@@ -21,7 +21,7 @@ namespace Garage.Client
 
         public GarageClient()
         {
-            EventHandlers["garage:spawn"] += new Action<string, string, int, int>(OnSpawn);
+            EventHandlers["garage:spawn"] += new Action<string, string, int, int, string>(OnSpawn);
             EventHandlers["garage:applyLock"] += new Action<int, bool>(OnApplyLock);
             EventHandlers["garage:applyEngine"] += new Action<int, bool>(OnApplyEngine);
             EventHandlers["garage:locate"] += new Action<string>(OnLocate);
@@ -39,7 +39,7 @@ namespace Garage.Client
 
         // ---------- spawn / park ----------
 
-        async void OnSpawn(string model, string plate, int engine, int body)
+        async void OnSpawn(string model, string plate, int engine, int body, string mods)
         {
             uint hash = (uint)GetHashKey(model);
             if (!IsModelInCdimage(hash) || !IsModelAVehicle(hash)) return;
@@ -58,6 +58,10 @@ namespace Garage.Client
             SetEntityAsMissionEntity(veh, true, true); // stop the game from cleaning it up
             SetPedIntoVehicle(ped, veh, -1);
             SetModelAsNoLongerNeeded(hash);
+
+            // Announce the new vehicle to other resources on this client; whoever understands the
+            // opaque "mods" string (customs-cs) applies it. The garage doesn't know what it means.
+            TriggerEvent("garage:vehicleSpawned", veh, mods ?? "");
 
             // Give the entity a moment to replicate, then tell the server which one it is.
             // The server only accepts it if the real entity carries the plate it gave us.

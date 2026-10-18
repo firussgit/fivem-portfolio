@@ -48,11 +48,12 @@ namespace Garage.Server
                    "engine INT NOT NULL DEFAULT 1000, body INT NOT NULL DEFAULT 1000, " +
                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_owner (owner))",
                    new object[0], _ =>
-                   {
-                       // After a restart nobody's cars are in the world any more: return them all to the garage.
-                       Db("UPDATE player_vehicles SET state = 1 WHERE state = 0", new object[0],
-                          n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage"));
-                   });
+                       // "mods" is opaque extension data written by other resources (e.g. customs-cs);
+                       // the garage only stores it and passes it on when the vehicle spawns.
+                       Db("ALTER TABLE player_vehicles ADD COLUMN IF NOT EXISTS mods VARCHAR(512) NULL", new object[0], __ =>
+                           // After a restart nobody's cars are in the world any more: return them all to the garage.
+                           Db("UPDATE player_vehicles SET state = 1 WHERE state = 0", new object[0],
+                              n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage"))));
             }
             catch (Exception e)
             {
@@ -149,12 +150,13 @@ namespace Garage.Server
             {
                 if (affected != 1) { Say(p, "That vehicle doesn't exist, isn't yours, or is already out."); return; }
 
-                Query("SELECT model, plate, engine, body FROM player_vehicles WHERE id = ?", new object[] { id }, rows =>
+                Query("SELECT model, plate, engine, body, mods FROM player_vehicles WHERE id = ?", new object[] { id }, rows =>
                 {
                     var v = rows[0];
                     string plate = v["plate"].ToString();
                     Track(license).Add(plate);
-                    TriggerClientEvent(p, "garage:spawn", v["model"].ToString(), plate, Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]));
+                    TriggerClientEvent(p, "garage:spawn", v["model"].ToString(), plate, Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]),
+                                       v["mods"] == null ? "" : v["mods"].ToString());
                     Debug.WriteLine($"[garage] {p.Name} took out #{id} [{plate}]");
                 });
             });

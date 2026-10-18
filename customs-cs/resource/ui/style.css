@@ -1,0 +1,67 @@
+:root {
+  --bg: #12161c;
+  --panel: #1b212b;
+  --line: #2a3340;
+  --text: #e8edf3;
+  --muted: #8b97a8;
+  --accent: #ff78c8;
+  --ok: #3fb97a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 4vw;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+
+.hidden { display: none; }
+
+#panel {
+  width: 340px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+}
+
+header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+h1 { margin: 0; font-size: 18px; color: var(--accent); }
+header small { color: var(--muted); letter-spacing: 1px; }
+#close { background: none; border: 0; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; }
+#close:hover { color: var(--text); }
+
+section { margin-top: 14px; }
+h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+
+label { display: flex; justify-content: space-between; font-size: 13px; margin: 10px 0 4px; }
+output { color: var(--accent); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+.check { justify-content: flex-start; gap: 8px; margin-top: 12px; }
+.check input { accent-color: var(--accent); }
+
+footer { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.total { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); }
+.total strong { font-size: 22px; color: var(--ok); font-variant-numeric: tabular-nums; }
+.total small { color: var(--accent); }
+
+#buy {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #1a0a13;
+  font-weight: 600;
+  cursor: pointer;
+}
+#buy:hover { filter: brightness(1.1); }
+#buy:disabled { opacity: .35; cursor: not-allowed; }

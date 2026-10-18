@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Customs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="panel" class="hidden">
+    <header>
+      <div>
+        <h1>Customs</h1>
+        <small id="plate"></small>
+      </div>
+      <button id="close" aria-label="Close">&times;</button>
+    </header>
+
+    <section>
+      <h2>Paint</h2>
+      <label>Primary colour <output id="pVal"></output></label>
+      <input id="p" type="range" min="0" max="160" step="1" value="0">
+      <label>Secondary colour <output id="sVal"></output></label>
+      <input id="s" type="range" min="0" max="160" step="1" value="0">
+      <label>Window tint <output id="tVal"></output></label>
+      <input id="t" type="range" min="0" max="6" step="1" value="0">
+    </section>
+
+    <section>
+      <h2>Performance</h2>
+      <label>Engine <output id="eVal"></output></label>
+      <input id="e" type="range" min="0" max="4" step="1" value="0">
+      <label>Brakes <output id="bVal"></output></label>
+      <input id="b" type="range" min="0" max="3" step="1" value="0">
+      <label>Transmission <output id="xVal"></output></label>
+      <input id="x" type="range" min="0" max="3" step="1" value="0">
+      <label class="check"><input id="u" type="checkbox"> Turbo</label>
+    </section>
+
+    <footer>
+      <div class="total">
+        <span>Total</span>
+        <strong id="cost">$0</strong>
+        <small id="discount" class="hidden">mechanic discount applied</small>
+      </div>
+      <button id="buy">Buy &amp; save</button>
+    </footer>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

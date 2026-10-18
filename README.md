@@ -8,6 +8,8 @@ self-contained resource you can drop into `resources/`.
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
+| [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
+| [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
 | [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
@@ -102,6 +104,40 @@ Vehicle customisation with a live preview, where the server prices and saves eve
 Commands: `/setcustoms` (admin) places a bay where you stand; drive in as the driver and press E.
 
 Requires `oxmysql`, `bank-cs` and `garage-cs`. Build with `./customs-cs/deploy.ps1`.
+## fuel-cs
+
+Fuel for every vehicle, tracked per licence plate.
+
+- **The client simulates, the server decides.** Drain depends on speed, which the client knows, so the
+  client burns fuel and reports the level every 5 seconds. The server only accepts a report that is
+  *lower* than what it has and drops by a plausible amount, from the player who is really driving
+  that plate. A modified client can never raise its own fuel.
+- **The only way up is paying.** At a station the server checks the player's real position and the
+  vehicle's, prices the litres (and caps them to the cash the player has), takes the money through
+  `bank-cs`, and only then sends the new level.
+- **Persisted.** Owned vehicles save their level in `player_vehicles.fuel` (batched writes every 30 s
+  and on resource stop), so a vehicle keeps its level through `/park` and `/takeout`. Other
+  vehicles start part-full.
+- An empty tank stops the engine; refuelling brings it back. Stations are placed in-game with `/setfuel`.
+
+Requires `oxmysql` and `bank-cs`. Build with `./fuel-cs/deploy.ps1`.
+
+## phone-cs
+
+A phone with its own number, contacts, texting and phone banking, backed by MySQL.
+
+- **Numbers belong to the licence.** Each player gets a unique `555-xxxx` number the first time and keeps it.
+- **No spoofing.** The "from" of a message is the server's own record of who the sender is; the NUI only
+  says who to send to and what to say. Input is cleaned, length-limited and rate-limited.
+- **Live and offline delivery.** Messages are stored; an online recipient gets a push and a notification,
+  an offline one finds it on their next open.
+- **Phone banking.** Pay an online player by number: the amount is taken from the sender with the
+  bank's atomic check-and-deduct and credited to the receiver, with a refund if the credit fails.
+- Contacts can only be deleted by their owner (`DELETE ... WHERE id = ? AND owner = ?`). User text is
+  rendered with `textContent`, never as HTML.
+
+Open with **F1** or `/phone`. Requires `oxmysql` and `bank-cs`. Build with `./phone-cs/deploy.ps1`.
+
 ## needs-cs
 
 Hunger and thirst, built to react to other resources without depending on them.

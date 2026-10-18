@@ -1,0 +1,127 @@
+:root {
+  --bg: #0f1318;
+  --panel: #181e26;
+  --line: #2a3340;
+  --text: #e8edf3;
+  --muted: #8b97a8;
+  --accent: #4cc3ff;
+  --mine: #1f6f9c;
+  --ok: #3fb97a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  padding: 0 3vw 4vh 0;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+
+.hidden { display: none !important; }
+
+#phone {
+  width: 320px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 6px solid #05070a;
+  border-radius: 34px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px 8px;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+#close { background: none; border: 0; color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer; }
+#close:hover { color: var(--text); }
+
+.tab { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 12px 10px; }
+
+button { font-family: inherit; cursor: pointer; }
+
+input {
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 13px;
+  user-select: text;
+}
+input:focus { outline: 1px solid var(--accent); }
+
+form { display: flex; gap: 6px; margin-top: 8px; }
+form button {
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #05202e;
+  font-weight: 600;
+  white-space: nowrap;
+}
+#addContact input:first-child { flex: 1.3; }
+#payForm { flex-direction: column; }
+#payForm button { padding: 10px; }
+
+#threads, #contacts, #bubbles { flex: 1; overflow-y: auto; min-height: 0; }
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 6px;
+  background: var(--panel);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.row:hover { background: #202833; }
+.row .name { font-size: 14px; }
+.row .sub { font-size: 12px; color: var(--muted); max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .dot { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #05202e; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.row .del { background: none; border: 0; color: var(--muted); font-size: 18px; }
+.row .del:hover { color: #ff6b6b; }
+.empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 13px; }
+
+.bar { display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; }
+.bar button { background: none; border: 0; color: var(--accent); font-size: 14px; }
+
+#bubbles { display: flex; flex-direction: column; gap: 5px; padding-right: 2px; }
+.bubble { max-width: 80%; padding: 7px 11px; border-radius: 14px; font-size: 13px; line-height: 1.35; background: var(--panel); align-self: flex-start; word-break: break-word; user-select: text; }
+.bubble.mine { align-self: flex-end; background: var(--mine); }
+
+.balance { text-align: center; margin: 30px 0 14px; }
+.balance small { display: block; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; font-size: 11px; }
+.balance strong { font-size: 32px; color: var(--ok); font-variant-numeric: tabular-nums; }
+.hint { margin-top: 12px; font-size: 12px; color: var(--muted); text-align: center; }
+
+nav { display: flex; border-top: 1px solid var(--line); background: var(--panel); }
+nav button {
+  flex: 1;
+  position: relative;
+  padding: 13px 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+nav button.active { color: var(--accent); }
+#badge { position: absolute; top: 6px; right: 14px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #ff5b5b; color: #fff; font-size: 10px; line-height: 16px; }

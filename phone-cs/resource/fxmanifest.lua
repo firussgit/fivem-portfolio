@@ -1,0 +1,22 @@
+fx_version 'cerulean'
+game 'gta5'
+
+author 'you'
+description 'Phone in C#: number per player, contacts, text messages and phone banking over MySQL, NUI interface'
+version '0.1.0'
+
+dependencies {
+    'oxmysql',
+    'bank-cs',
+}
+
+ui_page 'ui/index.html'
+
+files {
+    'ui/index.html',
+    'ui/style.css',
+    'ui/script.js',
+}
+
+client_script 'phone.client.net.dll'
+server_script 'phone.server.net.dll'

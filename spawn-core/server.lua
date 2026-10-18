@@ -25,9 +25,11 @@ RegisterNetEvent('spawncore:requestPos', function()
     TriggerClientEvent('spawncore:applyPos', src, raw and json.decode(raw) or false)
 end)
 
--- Used by /relog: write the latest reported position to disk before the client disconnects.
-RegisterNetEvent('spawncore:flush', function()
-    persist(source)
+-- /relog: persist the position we just received, then drop the player to the FiveM menu.
+RegisterNetEvent('spawncore:relog', function()
+    local src = source
+    persist(src)
+    DropPlayer(src, 'Relogging: reconnect from the FiveM menu.')
 end)
 
 AddEventHandler('playerDropped', function()

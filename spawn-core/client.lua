@@ -35,16 +35,14 @@ CreateThread(function()
     end
 end)
 
--- /relog: save position, then disconnect back to the FiveM menu (no GTA relaunch needed).
--- Scripts can't run "connect" (disabled in production mode), so reconnecting is one click
--- on the server in the FiveM history/direct-connect list.
+-- /relog: save position, then ask the server to drop us back to the FiveM menu (no GTA relaunch).
+-- Scripts can't run "connect" or "disconnect" (both disabled in production mode), so the
+-- server does the drop, and reconnecting is one click on the server in the FiveM menu.
 RegisterCommand('relog', function()
     local ped = PlayerPedId()
     local c = GetEntityCoords(ped)
     TriggerServerEvent('spawncore:savePos', c.x, c.y, c.z, GetEntityHeading(ped))
-    TriggerServerEvent('spawncore:flush')
-    Wait(500) -- let the server process the two events before we drop
-    ExecuteCommand('disconnect')
+    TriggerServerEvent('spawncore:relog') -- events from one client arrive in order
 end, false)
 
 -- /car [model]  e.g. /car sultan

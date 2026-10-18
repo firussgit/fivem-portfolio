@@ -105,7 +105,8 @@ docker compose up -d
 It builds each C# resource, stops on the first failed build, and copies the results to `resources\[portfolio]\`:
 
 ```powershell
-./setup.ps1 -ResourcesPath C:\path	o\server-data
+./setup.ps1 -ResourcesPath C:\path\to\server-data\resources
+esources
 esources
 ```
 

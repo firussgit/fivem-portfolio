@@ -14,7 +14,7 @@ and answers with the new truth.
 - [Resources](#resources)
 - [How the resources fit together](#how-the-resources-fit-together)
 - [Design principles](#design-principles)
-- [Quick start](#quick-start)
+- [Quick start](#quick-start) (one script plus a Docker database)
 - [Command reference](#command-reference)
 - [Try it: a five-minute tour](#try-it-a-five-minute-tour)
 - [Resource details](#resource-details)
@@ -84,53 +84,61 @@ and answers with the new truth.
 
 ## Quick start
 
-Requirements: a FiveM server (built against artifact 35245), the **.NET SDK**, **MariaDB/MySQL**,
-and [`oxmysql`](https://github.com/overextended/oxmysql). OneSync must be enabled as a launch
-argument (`+set onesync on`), because several resources read player positions on the server.
+You can run the whole thing on your own PC in a few steps. Everything below is Windows / PowerShell.
 
-**1. Build and deploy each resource** (each `deploy.ps1` builds the server and client assemblies,
-aborts if either build fails, and copies the result into your server's `resources` folder):
+**You need:** a FiveM server folder, the [.NET SDK](https://dotnet.microsoft.com/download),
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the database), a free
+[Cfx.re license key](https://keymaster.fivem.net) and GTA V with FiveM installed to join.
+
+**1. Get a FiveM server and the base resources.** Download the Windows server artifact from
+[runtime.fivem.net](https://runtime.fivem.net/artifacts/fivem/build_server_windows/master/), and clone
+[cfx-server-data](https://github.com/citizenfx/cfx-server-data) as the folder you run it from. Also download
+[oxmysql](https://github.com/overextended/oxmysql/releases) (the release `.zip`) into `resources/[standard]/oxmysql`.
+
+**2. Start the database** (MariaDB in Docker, only reachable from your own machine):
 
 ```powershell
-./bank-cs/deploy.ps1
-./garage-cs/deploy.ps1
-./customs-cs/deploy.ps1
-# ...and the same for fuel-cs, phone-cs, needs-cs, shops-cs, inventory-cs, jobs-cs, admin-cs
+docker compose up -d
 ```
 
-The Lua / JavaScript resources (`spawn-core`, `hello-lua`, `chat-tabcomplete`) are copied as they are.
+**3. Build and install every resource** into your server's `resources` folder with one command.
+It builds each C# resource, stops on the first failed build, and copies the results to `resources\[portfolio]\`:
 
-**2. Add the resources to `server.cfg`** in dependency order:
-
-```cfg
-set mysql_connection_string "mysql://user:password@127.0.0.1:3306/fivem"
-
-ensure oxmysql
-ensure chat
-ensure bank-cs
-ensure jobs-cs
-ensure inventory-cs
-ensure needs-cs
-ensure shops-cs
-ensure garage-cs
-ensure customs-cs
-ensure fuel-cs
-ensure phone-cs
-ensure spawn-core
-ensure admin-cs
+```powershell
+./setup.ps1 -ResourcesPath C:\path	o\server-data
+esources
 ```
 
-**3. Optional convars**
+**4. Configure the server.** Copy [`server.cfg.example`](server.cfg.example) to your server folder as
+`server.cfg`, put your license key in it, and (for a local test server only) uncomment the permission
+block at the bottom so you can use the setup commands. The connection string already matches the Docker database.
+
+**5. Start the server with OneSync** (it has to be a launch argument; several resources read player
+positions on the server):
+
+```powershell
+.\FXServer.exe +set onesync on +exec server.cfg
+```
+
+Join `localhost:30120` from the FiveM client. Database tables are created automatically on first start.
+The server console should print lines like `[bank] server started`, `[garage] ready` and `[phone] ready`.
+Then follow [the five-minute tour](#try-it-a-five-minute-tour).
+
+**Rebuilding one resource while developing:** each resource has its own `deploy.ps1`
+(for example `./garage-cs/deploy.ps1`). It targets `../../server-data/resources/[dev]/` by default,
+so edit the `$dest` line at the top if your layout differs, then `restart garage-cs` in the server console.
+
+### Configuration reference
 
 ```cfg
 set jobs_pay_interval_minutes 15      # how often paychecks are paid (jobs-cs)
 set needs_tick_seconds 60             # how often hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # how often shop stock refills (shops-cs)
-set admin_bootstrap_license "license:xxxxxxxx"   # first SuperAdmin (admin-cs); keep it out of git
+set admin_bootstrap_license "xxxxxxxx"   # first SuperAdmin (admin-cs); keep it out of git
 ```
 
-**4. Admin permissions.** Placement commands (`/setshop`, `/setcustoms`, `/setfuel`, `/atmscan`) and
-a few dev commands use ACE permissions, so you decide who gets them:
+Placement commands (`/setshop`, `/setcustoms`, `/setfuel`, `/atmscan`) and the dev commands check
+ACE permissions, so you decide who gets them. On a real server, give them to a staff group instead of everyone:
 
 ```cfg
 add_ace group.admin garage.admin allow
@@ -144,8 +152,7 @@ add_ace group.admin fuel.admin allow
 add_principal identifier.license:xxxxxxxx group.admin
 ```
 
-**5. Start the server** with OneSync: `FXServer.exe +set onesync on +exec server.cfg`.
-Database tables are created automatically on first start.
+Optional: [`chat-tabcomplete`](chat-tabcomplete) adds Tab completion to the stock chat (see its README for the four-step patch).
 
 ## Command reference
 

@@ -1,0 +1,16 @@
+# Database for the portfolio resources: `docker compose up -d`
+# Matches the connection string in server.cfg.example. Local development only.
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: fivem_dev_password
+      MARIADB_DATABASE: fivem
+    ports:
+      - "127.0.0.1:3307:3306"   # only reachable from this machine; 3307 avoids clashing with a local MySQL
+    volumes:
+      - fivem-db:/var/lib/mysql
+
+volumes:
+  fivem-db:

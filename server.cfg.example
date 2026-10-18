@@ -1,0 +1,61 @@
+# Example server.cfg for the portfolio resources. Copy it next to your FXServer as server.cfg.
+# Start the server with OneSync as a launch argument (it cannot be set from this file):
+#   FXServer.exe +set onesync on +exec server.cfg
+
+endpoint_add_tcp "0.0.0.0:30120"
+endpoint_add_udp "0.0.0.0:30120"
+
+sv_hostname "Portfolio Dev Server"
+sv_maxclients 4
+set sv_enforceGameBuild 3258
+
+# Get a free key at https://keymaster.fivem.net
+sv_licenseKey "YOUR_LICENSE_KEY_HERE"
+
+# --- database (matches docker-compose.yml) ---
+set mysql_connection_string "mysql://root:fivem_dev_password@127.0.0.1:3307/fivem"
+
+# --- optional tuning ---
+set jobs_pay_interval_minutes 15      # paychecks (jobs-cs)
+set needs_tick_seconds 60             # hunger / thirst decay (needs-cs)
+set shops_restock_minutes 5           # shop restock (shops-cs)
+
+# First SuperAdmin for admin-cs: your Rockstar licence, e.g. license:xxxxxxxxxxxxxxxx (see /id after joining)
+# set admin_bootstrap_license "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# --- base resources (from cfx-server-data) ---
+ensure mapmanager
+ensure chat
+ensure spawnmanager
+ensure basic-gamemode
+ensure baseevents
+
+# --- database driver (https://github.com/overextended/oxmysql/releases) ---
+ensure oxmysql
+
+# --- portfolio resources (order matters: dependencies first) ---
+ensure hello-lua
+ensure bank-cs
+ensure jobs-cs
+ensure inventory-cs
+ensure needs-cs
+ensure shops-cs
+ensure garage-cs
+ensure customs-cs
+ensure fuel-cs
+ensure phone-cs
+ensure spawn-core
+ensure admin-cs
+
+# --- permissions ---
+# Placement and test commands (/setshop, /setcustoms, /setfuel, /atmscan, /givecar, /giveitem, /setjob, /setneeds)
+# check these ACEs. For a LOCAL TEST SERVER ONLY, uncomment the block below so everyone may use them;
+# on a real server grant them to a staff group instead (see the README).
+#add_ace builtin.everyone garage.admin allow
+#add_ace builtin.everyone jobs.admin allow
+#add_ace builtin.everyone bank.admin allow
+#add_ace builtin.everyone inventory.admin allow
+#add_ace builtin.everyone shops.admin allow
+#add_ace builtin.everyone needs.admin allow
+#add_ace builtin.everyone customs.admin allow
+#add_ace builtin.everyone fuel.admin allow

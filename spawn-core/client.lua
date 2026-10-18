@@ -35,6 +35,19 @@ CreateThread(function()
     end
 end)
 
+-- /relog: save position, then reconnect to this same server (replaces alt+F4 + relaunch).
+RegisterCommand('relog', function()
+    local ped = PlayerPedId()
+    local c = GetEntityCoords(ped)
+    TriggerServerEvent('spawncore:savePos', c.x, c.y, c.z, GetEntityHeading(ped))
+    TriggerServerEvent('spawncore:flush')
+    Wait(500) -- let the server process the two events before we drop
+
+    local endpoint = GetCurrentServerEndpoint()
+    if not endpoint then return end
+    ExecuteCommand('connect ' .. endpoint)
+end, false)
+
 -- /car [model]  e.g. /car sultan
 local lastCar
 

@@ -25,6 +25,11 @@ RegisterNetEvent('spawncore:requestPos', function()
     TriggerClientEvent('spawncore:applyPos', src, raw and json.decode(raw) or false)
 end)
 
+-- Used by /relog: write the latest reported position to disk before the client disconnects.
+RegisterNetEvent('spawncore:flush', function()
+    persist(source)
+end)
+
 AddEventHandler('playerDropped', function()
     persist(source)
     positions[source] = nil

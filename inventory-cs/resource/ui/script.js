@@ -12,7 +12,8 @@ const post = (name, data = {}) =>
 
 let state = { slots: 30, maxWeight: 1, weight: 0, items: [] };
 let selected = null; // slot number
-let dragFrom = null;
+let drag = null;     // { from, startX, startY, ghost, active }
+let justDragged = false;
 
 const bySlot = (n) => state.items.find((i) => i.slot === n);
 const kg = (g) => (g / 1000).toFixed(1);
@@ -29,24 +30,11 @@ function render() {
     el.innerHTML = `<span class="num">${n}</span>` +
       (item ? `<span class="name">${item.label}</span><span class="count">${item.count}</span>` : '');
 
-    el.addEventListener('click', () => select(n));
-    if (item) {
-      el.draggable = true;
-      el.addEventListener('dragstart', (e) => { dragFrom = n; e.dataTransfer.setData('text/plain', String(n)); });
-    }
-    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('over'); });
-    el.addEventListener('dragleave', () => el.classList.remove('over'));
-    el.addEventListener('drop', (e) => {
-      e.preventDefault();
-      el.classList.remove('over');
-      if (dragFrom === null || dragFrom === n) return;
-      const src = bySlot(dragFrom);
-      if (!src) return;
-      // Holding Shift moves just the quantity box amount (a split); otherwise the whole stack.
-      const wanted = parseInt($('qty').value, 10);
-      const count = e.shiftKey && wanted > 0 && wanted < src.count ? wanted : src.count;
-      post('move', { from: dragFrom, to: n, count });
-      dragFrom = null;
+    el.addEventListener('click', () => { if (!justDragged) select(n); });
+    // Drag is handled with plain mouse events (below): HTML5 drag-and-drop is unreliable in FiveM's embedded browser.
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || !bySlot(n)) return;
+      drag = { from: n, startX: e.clientX, startY: e.clientY, ghost: null, active: false };
     });
     grid.appendChild(el);
   }
@@ -58,6 +46,57 @@ function render() {
 
   renderDetails();
 }
+
+const slotAt = (x, y) => {
+  const el = document.elementFromPoint(x, y);
+  return el ? el.closest('.slot') : null;
+};
+const clearOver = () => document.querySelectorAll('.slot.over').forEach((s) => s.classList.remove('over'));
+
+document.addEventListener('mousemove', (e) => {
+  if (!drag) return;
+
+  // A few pixels of movement before it counts as a drag, so plain clicks still select.
+  if (!drag.active) {
+    if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
+    const src = bySlot(drag.from);
+    if (!src) { drag = null; return; }
+    drag.active = true;
+    drag.ghost = document.createElement('div');
+    drag.ghost.className = 'ghost';
+    drag.ghost.textContent = `${src.label} x${src.count}`;
+    document.body.appendChild(drag.ghost);
+  }
+
+  drag.ghost.style.left = e.clientX + 'px';
+  drag.ghost.style.top = e.clientY + 'px';
+  clearOver();
+  const over = slotAt(e.clientX, e.clientY);
+  if (over) over.classList.add('over');
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (!d.active) return; // a plain click: the click handler selects the slot
+
+  d.ghost.remove();
+  clearOver();
+  justDragged = true;                       // swallow the click that follows a drag
+  setTimeout(() => { justDragged = false; }, 0);
+
+  const target = slotAt(e.clientX, e.clientY);
+  const src = bySlot(d.from);
+  if (!target || !src) return;
+  const to = parseInt(target.dataset.slot, 10);
+  if (to === d.from) return;
+
+  // Holding Shift moves just the quantity-box amount (a split); otherwise the whole stack.
+  const wanted = parseInt($('qty').value, 10);
+  const count = e.shiftKey && wanted > 0 && wanted < src.count ? wanted : src.count;
+  post('move', { from: d.from, to, count });
+});
 
 function select(n) {
   selected = bySlot(n) ? n : null;

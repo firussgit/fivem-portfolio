@@ -72,6 +72,20 @@ h1 { margin: 0; font-size: 18px; }
 .slot .count { position: absolute; bottom: 3px; right: 6px; font-size: 11px; font-weight: 600; }
 .slot .name { padding: 0 4px; line-height: 1.15; }
 
+.ghost {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  padding: 8px 12px;
+  background: var(--accent);
+  color: #08140d;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  pointer-events: none; /* so the slot underneath can still be detected */
+  z-index: 10;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+}
+
 #details { flex: 1; min-width: 190px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
 #details .empty { color: var(--muted); font-size: 13px; margin: 0; }
 h2 { margin: 0 0 4px; font-size: 16px; }

@@ -54,10 +54,4 @@ $('transfer').onclick = () => {
 $('close').onclick = close;
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.preventDefault(); close(); }
-  // F3: panic button. If the page can see this key, it has focus, so always release it.
-  if (e.key === 'F3') {
-    e.preventDefault();
-    $('atm').classList.add('hidden');
-    post('releaseCursor').catch(() => {});
-  }
 });

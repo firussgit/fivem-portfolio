@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
 | [`jobs-cs`](jobs-cs) | C# + MySQL | Jobs, grades, duty and paychecks paid through a bank export |
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/car` dev command |
@@ -69,6 +70,33 @@ Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
 
+## inventory-cs
+
+A slot and weight based inventory where the server owns every number.
+
+- **Intent, not state.** The UI sends "move slot 3 to 7" or "give 2 from slot 5". The server
+  validates slot bounds, ownership, counts, stack limits and weight, and only then mutates.
+  After every action it sends the new truth back, so the UI can't drift from the server.
+- **Dupe-resistant by construction.** Each online player's inventory lives in server memory and
+  is changed in single synchronous steps. `Give` removes from one inventory and adds to the
+  other in the same step, after checking the receiver has room, so an item can't exist twice
+  or nowhere. Moves, merges and swaps that break a rule are rejected without changing anything.
+- **Server chooses the receiver.** `Give nearby` picks the closest player within 3 m using
+  server-side positions, so a client can't hand items to a far-away or arbitrary player.
+- **Coalesced writes.** Mutations mark slots dirty and a 500 ms loop writes the final values
+  (and everything is flushed on disconnect and resource stop). That removes redundant writes
+  and prevents two quick changes to one slot from reaching MySQL out of order.
+- **Safe loading.** Rows are validated on load (unknown item, bad slot, oversized stack are
+  ignored and logged), and concurrent loads can never create two copies of one inventory.
+- **Item definitions in code**, DB stores only slot / item / amount.
+- **Exports for other resources:** `addItem`, `removeItem`, `hasItem`, `getCount`
+  (server-side only; all-or-nothing, so a failed add never leaves a partial grant).
+- **UI:** drag and drop to move, stack and swap (hold Shift to split the quantity box amount),
+  a detail panel with Use / Give nearby / Discard, and a weight bar.
+
+Commands: `I` opens the inventory, `/giveitem <id> <item> [count]` (admin).
+
+Requires `oxmysql`. Build with `./inventory-cs/deploy.ps1`.
 ## jobs-cs
 
 Jobs with grades, a duty toggle and automatic paychecks, built to cooperate with the bank.

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Inventory</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="inv" class="hidden">
+    <header>
+      <h1>Inventory</h1>
+      <div class="weight">
+        <span id="weightText">0 / 0 kg</span>
+        <div class="bar"><div id="weightFill"></div></div>
+      </div>
+      <button id="close" aria-label="Close">&times;</button>
+    </header>
+
+    <div class="body">
+      <div id="grid" class="grid"></div>
+
+      <aside id="details">
+        <p class="empty">Select an item. Drag items to move, stack or swap.</p>
+        <div id="info" class="hidden">
+          <h2 id="itemName"></h2>
+          <p id="itemMeta"></p>
+          <label for="qty">Quantity</label>
+          <input id="qty" type="number" min="1" step="1" value="1" autocomplete="off">
+          <div class="actions">
+            <button id="use">Use</button>
+            <button id="give">Give nearby</button>
+            <button id="discard" class="danger">Discard</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

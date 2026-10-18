@@ -6,6 +6,7 @@ self-contained resource you can drop into `resources/`.
 | Resource | Language | What it shows |
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
+| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/car` dev command |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
 
@@ -42,6 +43,28 @@ Build and deploy (needs the .NET SDK):
 ```
 
 Add `ensure bank-cs` to `server.cfg`.
+
+## garage-cs
+
+A persistent vehicle garage. The database is the source of truth and the client can't
+claim a car it doesn't own.
+
+- **MySQL via oxmysql.** `player_vehicles` (owner license, model, unique plate, stored/out
+  state, engine and body health). The table is created on start; see `sql/install.sql`.
+- **Atomic take-out.** `UPDATE ... WHERE id = ? AND owner = ? AND state = 1` checks ownership
+  *and* that the car is stored in one statement, so two simultaneous requests can never both
+  spawn the same vehicle.
+- **Server-verified parking (OneSync).** `/park` sends only a network id and the condition.
+  The server resolves the real entity, reads its plate, checks that this player took that
+  plate out, and only then stores and deletes it.
+- **Whitelisted models, capped garage size, rate limiting, clamped inputs.**
+- **Clean state.** Cars of a player who disconnects, and every car after a server restart,
+  go back to the garage instead of staying marked "out".
+
+Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
+
+Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
+Build with `./garage-cs/deploy.ps1`.
 
 ## spawn-core
 

@@ -21,7 +21,6 @@ namespace Bank.Client
         int _lastCheck;
         bool _nearAtm;
         bool _open;
-        bool _cursorOn;
         int _releaseUntil;
 
         public BankClient()
@@ -33,18 +32,8 @@ namespace Bank.Client
             RegisterCommand("atmdebug", new Action<int, System.Collections.Generic.List<object>, string>((s, a, r) => DebugAtm()), false);
             RegisterNui();
             // Escape hatches for the cursor.
-            // /uifix always releases. F3 toggles a free cursor; keepInput=true means the game keeps
-            // receiving keys while it is on, which is what lets F3 switch it back off.
+            // /uifix always releases the cursor.
             RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) => ReleaseCursor()), false);
-            RegisterCommand("togglecursor", new Action<int, List<object>, string>((s, a, r) =>
-            {
-                Trace($"togglecursor (cursorOn={_cursorOn}, open={_open})");
-                if (_cursorOn) { ReleaseCursor(); return; }
-                _cursorOn = true;
-                SetNuiFocus(true, true);
-                SetNuiFocusKeepInput(true);
-            }), false);
-            RegisterKeyMapping("togglecursor", "Toggle mouse cursor", "keyboard", "F3");
             Tick += OnTick;
         }
 
@@ -73,16 +62,8 @@ namespace Bank.Client
                 DisableControlAction(0, 200, true); // INPUT_FRONTEND_PAUSE_ALTERNATE
             }
 
-            // F3 cursor mode: game still gets keys (so F3 can turn it off); stop camera/attack while clicking.
-            if (_cursorOn && !_open)
-            {
-                DisableControlAction(0, 1, true);  // look left/right
-                DisableControlAction(0, 2, true);  // look up/down
-                DisableControlAction(0, 24, true); // attack
-            }
-
             if (_open) return; // UI has focus; nothing to draw or poll
-            if (!_nearAtm) { if (!releasing && !_cursorOn) await Delay(100); return; }
+            if (!_nearAtm) { if (!releasing) await Delay(100); return; }
 
             BeginTextCommandDisplayHelp("STRING");
             AddTextComponentSubstringPlayerName("Press ~INPUT_PICKUP~ to check your bank balance");
@@ -97,7 +78,6 @@ namespace Bank.Client
         {
             Trace("OpenUi");
             _open = true;
-            _cursorOn = true;
             SetNuiFocus(true, true);
             SendNuiMessage("{\"type\":\"open\"}");
             TriggerServerEvent("bank:requestBalance");
@@ -111,9 +91,8 @@ namespace Bank.Client
 
         void CloseUi()
         {
-            Trace($"CloseUi (open={_open}, cursorOn={_cursorOn}, pauseMenu={IsPauseMenuActive()})");
+            Trace($"CloseUi (open={_open}, pauseMenu={IsPauseMenuActive()})");
             _open = false;
-            _cursorOn = false;
             SetNuiFocus(false, false);
             SetNuiFocusKeepInput(false);
             // ESC closes our UI *and* may open the pause menu at the same moment; see OnTick.

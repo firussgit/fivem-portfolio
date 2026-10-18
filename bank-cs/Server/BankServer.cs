@@ -20,13 +20,6 @@ namespace Bank.Server
 
         public BankServer()
         {
-            EventHandlers["bank:requestBalance"] += new Action<Player>(p => SendBalance(p));
-            // Events used by the NUI. Same validation and rate limit as the chat commands.
-            EventHandlers["bank:deposit"] += new Action<Player, int>((p, amt) => FromUi(p, amt, () => MoveAmount(p, amt, true)));
-            EventHandlers["bank:withdraw"] += new Action<Player, int>((p, amt) => FromUi(p, amt, () => MoveAmount(p, amt, false)));
-            EventHandlers["bank:transfer"] += new Action<Player, int, int>((p, id, amt) => FromUi(p, amt, () => TransferAmount(p, id, amt)));
-            EventHandlers["playerDropped"] +=new Action<Player, string>((p, _) => OnDropped(p));
-
             Cmd("balance", (p, a) => SendBalance(p));
             Cmd("deposit", (p, a) => Move(p, a, toBank: true));
             Cmd("withdraw", (p, a) => Move(p, a, toBank: false));
@@ -34,6 +27,25 @@ namespace Bank.Server
 
             Debug.WriteLine("[bank] server started");
         }
+
+        // ---------- events from the client / NUI ----------
+        // [FromSource] is how this runtime hands us the sender. A plain Action<Player> lambda
+        // receives null for network events. Same validation and rate limit as the chat commands.
+
+        [EventHandler("bank:requestBalance")]
+        void OnRequestBalance([FromSource] Player p) => SendBalance(p);
+
+        [EventHandler("bank:deposit")]
+        void OnDeposit([FromSource] Player p, int amount) => FromUi(p, amount, () => MoveAmount(p, amount, true));
+
+        [EventHandler("bank:withdraw")]
+        void OnWithdraw([FromSource] Player p, int amount) => FromUi(p, amount, () => MoveAmount(p, amount, false));
+
+        [EventHandler("bank:transfer")]
+        void OnTransfer([FromSource] Player p, int targetId, int amount) => FromUi(p, amount, () => TransferAmount(p, targetId, amount));
+
+        [EventHandler("playerDropped")]
+        void OnPlayerDropped([FromSource] Player p, string reason) => OnDropped(p);
 
         // ---------- commands ----------
 
@@ -153,6 +165,7 @@ namespace Bank.Server
 
         void OnDropped(Player p)
         {
+            if (p == null) return;
             string id = p.Identifiers["license"];
             if (id != null) _accounts.Remove(id);
             _lastUse.Remove(int.Parse(p.Handle));

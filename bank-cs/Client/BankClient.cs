@@ -38,6 +38,7 @@ namespace Bank.Client
             RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) => ReleaseCursor()), false);
             RegisterCommand("togglecursor", new Action<int, List<object>, string>((s, a, r) =>
             {
+                Trace($"togglecursor (cursorOn={_cursorOn}, open={_open})");
                 if (_cursorOn) { ReleaseCursor(); return; }
                 _cursorOn = true;
                 SetNuiFocus(true, true);
@@ -90,8 +91,11 @@ namespace Bank.Client
             if (IsControlJustPressed(0, KeyE)) OpenUi();
         }
 
+        static void Trace(string msg) => Debug.WriteLine("[bank-trace] " + msg);
+
         void OpenUi()
         {
+            Trace("OpenUi");
             _open = true;
             _cursorOn = true;
             SetNuiFocus(true, true);
@@ -107,6 +111,7 @@ namespace Bank.Client
 
         void CloseUi()
         {
+            Trace($"CloseUi (open={_open}, cursorOn={_cursorOn}, pauseMenu={IsPauseMenuActive()})");
             _open = false;
             _cursorOn = false;
             SetNuiFocus(false, false);
@@ -119,7 +124,8 @@ namespace Bank.Client
         // the server is the one that validates them.
         void RegisterNui()
         {
-            EventHandlers["__cfx_nui:close"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { CloseUi(); cb("ok"); });
+            EventHandlers["__cfx_nui:close"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { Trace("nui callback: close"); CloseUi(); cb("ok"); });
+            EventHandlers["__cfx_nui:log"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { Trace("page: " + d["msg"]); cb("ok"); });
             EventHandlers["__cfx_nui:deposit"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
             {
                 TriggerServerEvent("bank:deposit", Convert.ToInt32(d["amount"])); cb("ok");

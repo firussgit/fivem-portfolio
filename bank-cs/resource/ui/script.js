@@ -52,6 +52,10 @@ $('transfer').onclick = () => {
   post('transfer', { amount: a, target });
 };
 $('close').onclick = close;
+// Diagnostics: report every key the page receives (proves whether the page has focus).
+const trace = (msg) => post('log', { msg }).catch(() => {});
+
 document.addEventListener('keydown', (e) => {
+  trace('keydown ' + e.key);
   if (e.key === 'Escape') { e.preventDefault(); close(); }
 });

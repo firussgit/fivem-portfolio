@@ -21,6 +21,7 @@ namespace Bank.Client
         int _lastCheck;
         bool _nearAtm;
         bool _open;
+        int _suppressPauseUntil;
 
         public BankClient()
         {
@@ -30,6 +31,12 @@ namespace Bank.Client
             EventHandlers["bank:balance"] += new Action<int, int>(OnBalance);
             RegisterCommand("atmdebug", new Action<int, System.Collections.Generic.List<object>, string>((s, a, r) => DebugAtm()), false);
             RegisterNui();
+            // Escape hatch if the cursor ever gets stuck.
+            RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) =>
+            {
+                SendNuiMessage("{\"type\":\"close\"}");
+                CloseUi();
+            }), false);
             Tick += OnTick;
         }
 
@@ -49,6 +56,7 @@ namespace Bank.Client
                 _nearAtm = IsNearAtm();
             }
 
+            if (GetGameTimer() < _suppressPauseUntil) DisableControlAction(0, 200, true); // INPUT_FRONTEND_PAUSE_ALTERNATE
             if (_open) return; // UI has focus; nothing to draw or poll
             if (!_nearAtm) { await Delay(100); return; }
 
@@ -71,6 +79,9 @@ namespace Bank.Client
         {
             _open = false;
             SetNuiFocus(false, false);
+            SetNuiFocusKeepInput(false);
+            // ESC closes our UI *and* would open the pause menu in the same frame; swallow it briefly.
+            _suppressPauseUntil = GetGameTimer() + 400;
         }
 
         // NUI callbacks arrive as "__cfx_nui:<name>" events. Amounts are forwarded as-is:

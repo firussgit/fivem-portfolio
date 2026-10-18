@@ -24,7 +24,8 @@ function readAmount() {
 
 function close() {
   $('atm').classList.add('hidden');
-  post('close');
+  // Always tell the game, even if the request fails, so focus is released.
+  post('close').catch(() => {});
 }
 
 window.addEventListener('message', ({ data }) => {
@@ -51,4 +52,6 @@ $('transfer').onclick = () => {
   post('transfer', { amount: a, target });
 };
 $('close').onclick = close;
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); close(); }
+});

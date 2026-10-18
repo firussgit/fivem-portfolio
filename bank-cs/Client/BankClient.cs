@@ -124,6 +124,11 @@ namespace Bank.Client
         // the server is the one that validates them.
         void RegisterNui()
         {
+            // Without this, the page's fetch() to https://<resource>/<name> is never delivered to
+            // the "__cfx_nui:<name>" event below (this was the stuck-cursor bug: "close" got dropped).
+            foreach (var name in new[] { "close", "deposit", "withdraw", "transfer", "log" })
+                RegisterNuiCallbackType(name);
+
             EventHandlers["__cfx_nui:close"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { Trace("nui callback: close"); CloseUi(); cb("ok"); });
             EventHandlers["__cfx_nui:log"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { Trace("page: " + d["msg"]); cb("ok"); });
             EventHandlers["__cfx_nui:deposit"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>

@@ -487,3 +487,7 @@ Developed and tested against a local FiveM server (artifact 35245). C# resources
 .NET Framework 4.5.2 via the `CitizenFX.Core` NuGet packages, and each one builds with
 `dotnet build` through its `deploy.ps1`. The `*-dev` ACEs in a local `server.cfg` are for testing
 only; on a real server, grant them to staff groups as shown in the quick start.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

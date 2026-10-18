@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Phone in C#: number per player, contacts, text messages and phone banking over MySQL, NUI interface'
 version '0.1.0'
 

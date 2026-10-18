@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Vehicle fuel in C#: server-tracked levels, paid refuelling at stations, persisted on owned vehicles'
 version '0.1.0'
 

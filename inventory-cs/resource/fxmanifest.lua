@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Slot/weight inventory in C#: server-authoritative, MySQL-backed, drag and drop NUI'
 version '0.1.0'
 

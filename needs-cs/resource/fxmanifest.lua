@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Hunger and thirst in C#: server-side decay, item effects via events, HUD'
 version '0.1.0'
 

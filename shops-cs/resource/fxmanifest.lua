@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Shops in C#: server-validated purchases across bank-cs and inventory-cs'
 version '0.1.0'
 

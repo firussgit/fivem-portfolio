@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'you'
+author 'firuss'
 description 'Persistent vehicle garage in C#: oxmysql storage, server-validated ownership'
 version '0.1.0'
 

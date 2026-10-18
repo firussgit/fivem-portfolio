@@ -21,6 +21,7 @@ namespace Bank.Client
         int _lastCheck;
         bool _nearAtm;
         bool _open;
+        bool _cursorOn;
         int _suppressPauseUntil;
 
         public BankClient()
@@ -31,12 +32,17 @@ namespace Bank.Client
             EventHandlers["bank:balance"] += new Action<int, int>(OnBalance);
             RegisterCommand("atmdebug", new Action<int, System.Collections.Generic.List<object>, string>((s, a, r) => DebugAtm()), false);
             RegisterNui();
-            // Escape hatch if the cursor ever gets stuck.
-            RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) =>
+            // Escape hatches for the cursor.
+            // /uifix always releases. F3 (game side) toggles the cursor on/off; when the page
+            // already has focus, script.js handles F3 itself and calls "releaseCursor".
+            RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) => ReleaseCursor()), false);
+            RegisterCommand("togglecursor", new Action<int, List<object>, string>((s, a, r) =>
             {
-                SendNuiMessage("{\"type\":\"close\"}");
-                CloseUi();
+                if (_cursorOn) ReleaseCursor();
+                else { _cursorOn = true; SetNuiFocus(true, true); }
             }), false);
+            RegisterKeyMapping("togglecursor", "Toggle mouse cursor", "keyboard", "F3");
+            EventHandlers["__cfx_nui:releaseCursor"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { ReleaseCursor(); cb("ok"); });
             Tick += OnTick;
         }
 
@@ -70,14 +76,22 @@ namespace Bank.Client
         void OpenUi()
         {
             _open = true;
+            _cursorOn = true;
             SetNuiFocus(true, true);
             SendNuiMessage("{\"type\":\"open\"}");
             TriggerServerEvent("bank:requestBalance");
         }
 
+        void ReleaseCursor()
+        {
+            SendNuiMessage("{\"type\":\"close\"}");
+            CloseUi();
+        }
+
         void CloseUi()
         {
             _open = false;
+            _cursorOn = false;
             SetNuiFocus(false, false);
             SetNuiFocusKeepInput(false);
             // ESC closes our UI *and* would open the pause menu in the same frame; swallow it briefly.

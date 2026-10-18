@@ -1,0 +1,73 @@
+:root {
+  --bg: #12161c;
+  --panel: #1b212b;
+  --line: #2a3340;
+  --text: #e8edf3;
+  --muted: #8b97a8;
+  --accent: #3fb97a;
+  --blue: #4a9eff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+}
+
+.hidden { display: none; }
+
+#shop {
+  width: 560px;
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+}
+
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+h1 { margin: 0; font-size: 18px; }
+#close { background: none; border: 0; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; }
+#close:hover { color: var(--text); }
+
+.pay { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; font-size: 13px; }
+.pay .label { color: var(--muted); }
+.choice { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.choice strong { color: var(--accent); font-variant-numeric: tabular-nums; }
+.choice input { accent-color: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 0 8px 8px; }
+td { padding: 8px; border-top: 1px solid var(--line); }
+td.price { color: var(--accent); font-variant-numeric: tabular-nums; }
+td.stock.low { color: #ffb347; }
+td.stock.out { color: #ff6b6b; }
+
+.qty {
+  width: 64px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+}
+.qty:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+button.buy {
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #08140d;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.buy:hover { filter: brightness(1.1); }
+button.buy:disabled { opacity: .35; cursor: not-allowed; }

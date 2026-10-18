@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
 | [`jobs-cs`](jobs-cs) | C# + MySQL | Jobs, grades, duty and paychecks paid through a bank export |
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
@@ -70,6 +71,32 @@ Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
 
+## shops-cs
+
+Shops where a purchase spans two other resources and still can't leave things half done.
+
+- **All-or-nothing purchases.** The server validates the shop, distance, item, quantity and
+  stock first, then checks `inventory-cs` can carry it (`canAdd`), takes the money with
+  `bank-cs` (`removeMoney` checks the balance and deducts in one step), and finally hands over
+  the item (`addItem`). Those steps run back to back in one synchronous handler, so another
+  request can't slip in between. If the last step ever fails, the money is refunded.
+- **Never trusts the client.** It sends a shop id, an item id, a quantity and "cash" or "bank".
+  Prices, stock, locations and balances all come from the server.
+- **Server-side proximity.** The buyer's position is read on the server (OneSync) and must be
+  within 4 m of the shop. Shop spots are placed in-game with `/setshop <id>` and saved to a file,
+  so there are no hand-typed coordinates.
+- **Stock that restocks.** Limited stock per item, refilled on a timer
+  (`set shops_restock_minutes 5`); open shop windows update live. Stock is intentionally kept
+  in memory, while every purchase is written to a `shop_purchases` history table.
+- **Cash or bank**, chosen per purchase, with live balances in the UI.
+- **Fails safe.** If the bank or inventory resource is down, the purchase is aborted before
+  anything changes.
+
+Shops: General Store (water, sandwich, bandage, radio) and Hardware Store (lockpick, repair kit).
+Commands: stand where a shop should be and run `/setshop <general|hardware>` (admin); players
+walk up and press E.
+
+Requires `oxmysql`, `bank-cs` and `inventory-cs`. Build with `./shops-cs/deploy.ps1`.
 ## inventory-cs
 
 A slot and weight based inventory where the server owns every number.

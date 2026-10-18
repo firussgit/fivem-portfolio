@@ -68,6 +68,15 @@ namespace Inventory.Server
             Exports.Add("removeItem", new Func<int, string, int, bool>(ExportRemove));
             Exports.Add("hasItem", new Func<int, string, int, bool>((src, item, n) => ExportCount(src, item) >= n && n > 0));
             Exports.Add("getCount", new Func<int, string, int>(ExportCount));
+            Exports.Add("canAdd", new Func<int, string, int, bool>((src, item, n) =>
+            {
+                string lic; var inv = Cached(src, out lic);
+                return inv != null && CanAdd(inv, item, n);
+            }));
+
+            // Exports only see loaded inventories, so load them as soon as players are here
+            // (including anyone already online when this resource starts).
+            foreach (var p in Players) With(p, (l, i) => { });
 
             CreateTable();
             Tick += FlushLoop;
@@ -187,6 +196,12 @@ namespace Inventory.Server
         // ==================================================================
         //  Events from the client / NUI
         // ==================================================================
+
+        [EventHandler("playerJoining")]
+        void OnJoining([FromSource] Player p, string oldId)
+        {
+            if (p != null) With(p, (l, i) => { });
+        }
 
         [EventHandler("inv:request")]
         void OnRequest([FromSource] Player p)

@@ -38,8 +38,43 @@ namespace Bank.Server
 
             // Server-side export for other resources (e.g. paychecks). Clients can't call server exports.
             Exports.Add("addBank", new Func<int, int, string, bool>(AddBank));
+            Exports.Add("addMoney", new Func<int, string, int, string, bool>((src, account, amount, reason) => Change(src, account, amount, reason, +1)));
+            Exports.Add("removeMoney", new Func<int, string, int, string, bool>((src, account, amount, reason) => Change(src, account, amount, reason, -1)));
+            Exports.Add("getBalances", new Func<int, string>(GetBalances));
 
             Debug.WriteLine("[bank] server started");
+        }
+
+        /// <summary>
+        /// Adds (+1) or removes (-1) money from "cash" or "bank". The check and the change happen in one
+        /// synchronous step, so a purchase can never overdraw. Returns false and changes nothing on any problem.
+        /// </summary>
+        bool Change(int src, string account, int amount, string reason, int sign)
+        {
+            if (amount <= 0 || amount > MaxAmount) return false;
+            if (account != "cash" && account != "bank") return false;
+            var p = Players[src];
+            if (p == null) return false;
+            var acc = Get(p);
+            if (acc == null) return false;
+
+            int current = account == "cash" ? acc.Cash : acc.Bank;
+            if (sign < 0 && current < amount) return false;
+            if (sign > 0 && current > int.MaxValue - amount) return false;
+
+            int updated = current + sign * amount;
+            if (account == "cash") acc.Cash = updated; else acc.Bank = updated;
+            Save(p, acc);
+            Log(p, (sign > 0 ? "credit:" : "debit:") + account + ":" + (reason ?? "unknown"), amount);
+            Say(p, $"{(sign > 0 ? "+" : "-")}${amount} {account} ({reason}). Cash: ${acc.Cash} | Bank: ${acc.Bank}");
+            return true;
+        }
+
+        string GetBalances(int src)
+        {
+            var p = Players[src];
+            var acc = p == null ? null : Get(p);
+            return acc == null ? null : acc.Cash + "," + acc.Bank;
         }
 
         /// <summary>Credits a player's bank balance. Returns false (and changes nothing) on any invalid input.</summary>

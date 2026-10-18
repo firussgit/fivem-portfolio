@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`jobs-cs`](jobs-cs) | C# + MySQL | Jobs, grades, duty and paychecks paid through a bank export |
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/car` dev command |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
@@ -67,6 +68,26 @@ Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
 
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
+
+## jobs-cs
+
+Jobs with grades, a duty toggle and automatic paychecks, built to cooperate with the bank.
+
+- **Cross-resource integration.** Paychecks are paid with `exports['bank-cs']:addBank(...)`.
+  It's a *server* export, so a client can't call it to give itself money, and the bank
+  re-validates the amount and the player on every call instead of trusting the caller.
+- **Definitions in code, state in the database.** The DB stores only `job` and `grade`;
+  labels and salaries come from the server-side definitions, so changing a salary needs no
+  migration, and a job removed from the config falls back to unemployed instead of crashing.
+- **Pay only while on duty.** `/duty` toggles it; duty resets on disconnect, on server restart
+  and whenever a job changes, so nobody is paid for a role they no longer hold.
+- **Exports for other resources:** `getJob`, `getGrade`, `isOnDuty(src, job)`
+  (synchronous, served from a per-player cache that lives only while they're online).
+- Interval is configurable with `set jobs_pay_interval_minutes 15`.
+
+Commands: `/jobs`, `/job`, `/duty`, `/quitjob`, `/setjob <id> <job> [grade]` (admin).
+
+Requires `oxmysql` and `bank-cs`. Build with `./jobs-cs/deploy.ps1`.
 
 ## admin-cs
 

@@ -13,6 +13,7 @@ namespace Bank.Server
     {
         const int StartingCash = 500;
         const int MaxAmount = 1000000;
+        const int MaxCredit = 100000; // per call limit for the addBank export
         const long CooldownMs = 500;
 
         readonly Dictionary<string, Account> _accounts = new Dictionary<string, Account>();
@@ -25,7 +26,26 @@ namespace Bank.Server
             Cmd("withdraw", (p, a) => Move(p, a, toBank: false));
             Cmd("transfer", Transfer);
 
+            // Server-side export for other resources (e.g. paychecks). Clients can't call server exports.
+            Exports.Add("addBank", new Func<int, int, string, bool>(AddBank));
+
             Debug.WriteLine("[bank] server started");
+        }
+
+        /// <summary>Credits a player's bank balance. Returns false (and changes nothing) on any invalid input.</summary>
+        bool AddBank(int src, int amount, string reason)
+        {
+            if (amount <= 0 || amount > MaxCredit) return false;
+            var p = Players[src];
+            if (p == null) return false;
+            var acc = Get(p);
+            if (acc == null || acc.Bank > int.MaxValue - amount) return false;
+
+            acc.Bank += amount;
+            Save(p, acc);
+            Log(p, "credit:" + (reason ?? "unknown"), amount);
+            Say(p, $"+${amount} deposited ({reason}). Bank: ${acc.Bank}");
+            return true;
         }
 
         // ---------- events from the client / NUI ----------

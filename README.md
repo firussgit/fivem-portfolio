@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/car` dev command |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
 
@@ -65,6 +66,28 @@ Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
 
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
+
+## admin-cs
+
+Server-side admin tool where every action is permission-checked, rank-checked and logged.
+
+- **Roles in MySQL:** `mod < admin < superadmin`. Each command declares its minimum role,
+  checked on every call (no cached role that can go stale).
+- **Rank protection.** You can only act on someone ranking strictly below you, so a mod can't
+  kick an admin and an admin can't ban another admin.
+- **Bans enforced at connect** with `playerConnecting` deferrals, so a banned player is
+  refused before they ever load in. Supports `30m`, `12h`, `7d` and `perm`.
+- **Audit log.** Every kick, ban, unban, teleport, announcement and role change is stored
+  with who did it, to whom and why (`/adminlog`).
+- **Safe by default.** Bans are saved *before* the player is dropped, and a failed insert
+  aborts the kick. Reasons are length-limited and commands are rate-limited.
+- **Bootstrapping.** The first SuperAdmin comes from the `admin_bootstrap_license` convar
+  (kept in `server.cfg`, never committed). After that, roles are managed with `/setrole`.
+
+Commands: `/kick`, `/ban <id> <30m|12h|7d|perm> [reason]`, `/unban <ban id>`, `/bans`,
+`/goto`, `/bring`, `/announce`, `/setrole <id> <role>` (superadmin), `/adminlog`.
+
+Requires `oxmysql` and OneSync. Build with `./admin-cs/deploy.ps1`.
 
 ## spawn-core
 

@@ -35,6 +35,12 @@ namespace Admin.Server
         {
             _bootstrapLicense = GetConvar("admin_bootstrap_license", "");
 
+            // Anyone can ask for their own id; the player list is for staff.
+            RegisterCommand("id", new Action<int, List<object>, string>((src, args, raw) =>
+            {
+                if (src > 0 && Players[src] != null) Say(Players[src], $"Your server id is {src}.");
+            }), false);
+            Cmd("players", Role.Mod, ListPlayers);
             Cmd("kick", Role.Mod, Kick);
             Cmd("ban", Role.Admin, Ban);
             Cmd("unban", Role.Admin, Unban);
@@ -110,6 +116,13 @@ namespace Admin.Server
         }
 
         // ---------- commands ----------
+
+        void ListPlayers(Actor a, List<object> args)
+        {
+            Reply(a, "Online players:");
+            foreach (var p in Players)
+                Reply(a, $"[{p.Handle}] {p.Name}");
+        }
 
         void Kick(Actor a, List<object> args)
         {

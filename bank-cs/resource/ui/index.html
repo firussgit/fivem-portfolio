@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ATM</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="atm" class="hidden">
+    <header>
+      <h1>Maze Bank <span>ATM</span></h1>
+      <button id="close" aria-label="Close">&times;</button>
+    </header>
+
+    <section class="balances">
+      <div><small>Cash</small><strong id="cash">$0</strong></div>
+      <div><small>Bank</small><strong id="bank">$0</strong></div>
+    </section>
+
+    <label for="amount">Amount</label>
+    <input id="amount" type="number" min="1" step="1" placeholder="0" autocomplete="off">
+
+    <div class="row">
+      <button id="deposit">Deposit</button>
+      <button id="withdraw">Withdraw</button>
+    </div>
+
+    <label for="target">Transfer to player ID</label>
+    <div class="row">
+      <input id="target" type="number" min="0" step="1" placeholder="ID" autocomplete="off">
+      <button id="transfer">Send</button>
+    </div>
+
+    <p id="error" role="alert"></p>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>

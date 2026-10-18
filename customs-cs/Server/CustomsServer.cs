@@ -15,8 +15,16 @@ namespace Customs.Server
     {
         public int Primary, Secondary, Tint, Engine, Brakes, Transmission, Turbo;
 
+        // Cosmetic body parts: key -> GTA mod type. 0 is stock, n means the vehicle's (n-1)th variant.
+        // How many variants exist depends on the vehicle model, which only the client can see; the client
+        // clamps to what the model has, and the server only guarantees the number is in a sane range.
+        public static readonly string[] PartKeys = { "sp", "fb", "rb", "sk", "ex", "gr", "hd", "rf" };
+        public const int MaxPartLevel = 40;
+        public readonly Dictionary<string, int> Parts = PartKeys.ToDictionary(k => k, k => 0);
+
         public string Serialize() =>
-            $"p={Primary};s={Secondary};t={Tint};e={Engine};b={Brakes};x={Transmission};u={Turbo}";
+            $"p={Primary};s={Secondary};t={Tint};e={Engine};b={Brakes};x={Transmission};u={Turbo};" +
+            string.Join(";", PartKeys.Select(k => k + "=" + Parts[k]));
 
         // Strict: unknown keys, missing keys or out-of-range values make the whole string invalid.
         // The server never builds a mods string from anything it hasn't validated this way.
@@ -31,20 +39,29 @@ namespace Customs.Server
                 if (kv.Length != 2 || !int.TryParse(kv[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out v)) return null;
                 values[kv[0]] = v;
             }
+            // The seven core keys are required. Body parts are optional (older saves don't have them),
+            // and any key we don't know makes the whole string invalid.
             string[] keys = { "p", "s", "t", "e", "b", "x", "u" };
-            if (values.Count != keys.Length || keys.Any(k => !values.ContainsKey(k))) return null;
+            if (keys.Any(k => !values.ContainsKey(k))) return null;
+            if (values.Keys.Any(k => !keys.Contains(k) && !PartKeys.Contains(k))) return null;
 
             var m = new Mods
             {
                 Primary = values["p"], Secondary = values["s"], Tint = values["t"],
                 Engine = values["e"], Brakes = values["b"], Transmission = values["x"], Turbo = values["u"],
             };
+            foreach (var k in PartKeys)
+            {
+                int level;
+                if (values.TryGetValue(k, out level)) m.Parts[k] = level;
+            }
             return m.IsValid() ? m : null;
         }
 
         public bool IsValid() =>
             InRange(Primary, 0, 160) && InRange(Secondary, 0, 160) && InRange(Tint, 0, 6) &&
-            InRange(Engine, 0, 4) && InRange(Brakes, 0, 3) && InRange(Transmission, 0, 3) && InRange(Turbo, 0, 1);
+            InRange(Engine, 0, 4) && InRange(Brakes, 0, 3) && InRange(Transmission, 0, 3) && InRange(Turbo, 0, 1) &&
+            Parts.Values.All(v => InRange(v, 0, MaxPartLevel));
 
         static bool InRange(int v, int lo, int hi) => v >= lo && v <= hi;
     }
@@ -70,6 +87,7 @@ namespace Customs.Server
         const int BrakesPerLevel = 350;
         const int TransmissionPerLevel = 450;
         const int TurboPrice = 1800;
+        const int PartPrice = 450; // per body part changed (spoiler, bumpers, ...)
         const int MechanicDiscountPercent = 20;
 
         const float BayRange = 10f;
@@ -221,6 +239,8 @@ namespace Customs.Server
             total += Math.Max(0, desired.Brakes - current.Brakes) * (long)BrakesPerLevel;
             total += Math.Max(0, desired.Transmission - current.Transmission) * (long)TransmissionPerLevel;
             if (desired.Turbo > current.Turbo) total += TurboPrice;
+            foreach (var k in Mods.PartKeys)
+                if (desired.Parts[k] != current.Parts[k]) total += PartPrice;
 
             if (discount) total = total * (100 - MechanicDiscountPercent) / 100;
             return (int)total;

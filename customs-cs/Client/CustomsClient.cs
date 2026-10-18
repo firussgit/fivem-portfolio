@@ -17,6 +17,19 @@ namespace Customs.Client
         const float MarkerRange = 40f;
         const int KeyE = 38; // INPUT_PICKUP
 
+        // Body part key -> GTA mod type (must match the server's Mods.PartKeys).
+        static readonly Dictionary<string, int> PartTypes = new Dictionary<string, int>
+        {
+            ["sp"] = 0,  // spoiler
+            ["fb"] = 1,  // front bumper
+            ["rb"] = 2,  // rear bumper
+            ["sk"] = 3,  // side skirt
+            ["ex"] = 4,  // exhaust
+            ["gr"] = 6,  // grille
+            ["hd"] = 7,  // hood
+            ["rf"] = 10, // roof
+        };
+
         readonly List<Vector3> _bays = new List<Vector3>();
         readonly List<int> _blips = new List<int>();
 
@@ -105,8 +118,14 @@ namespace Customs.Client
 
             _open = true;
             _current = current;
+
+            // Which parts this model actually has (a car with no spoilers simply gets no spoiler slider).
+            SetVehicleModKit(_vehicle, 0);
+            var caps = new List<string>();
+            foreach (var kv in PartTypes) caps.Add($"\"{kv.Key}\":{GetNumVehicleMods(_vehicle, kv.Value)}");
+
             SetNuiFocus(true, true);
-            SendNuiMessage("{\"type\":\"open\",\"plate\":\"" + plate + "\",\"mods\":\"" + current + "\"}");
+            SendNuiMessage("{\"type\":\"open\",\"plate\":\"" + plate + "\",\"mods\":\"" + current + "\",\"caps\":{" + string.Join(",", caps) + "}}");
         }
 
         void Close()
@@ -177,6 +196,11 @@ namespace Customs.Client
             SetLevel(veh, 12, v["b"]); // brakes
             SetLevel(veh, 13, v["x"]); // transmission
             ToggleVehicleMod(veh, 18, v["u"] == 1); // turbo
+            foreach (var kv in PartTypes)
+            {
+                int level;
+                SetLevel(veh, kv.Value, v.TryGetValue(kv.Key, out level) ? level : 0);
+            }
         }
 
         // Level 0 is stock (-1). The game exposes only as many levels as the vehicle supports, so clamp.
@@ -189,6 +213,7 @@ namespace Customs.Client
         static Dictionary<string, int> Parse(string mods)
         {
             var v = new Dictionary<string, int> { ["p"] = 0, ["s"] = 0, ["t"] = 0, ["e"] = 0, ["b"] = 0, ["x"] = 0, ["u"] = 0 };
+            foreach (var k in PartTypes.Keys) v[k] = 0;
             foreach (var part in (mods ?? "").Split(';'))
             {
                 var kv = part.Split('=');

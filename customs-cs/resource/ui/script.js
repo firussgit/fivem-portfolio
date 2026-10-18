@@ -10,7 +10,17 @@ const post = (name, data = {}) =>
     body: JSON.stringify(data),
   }).catch(() => {});
 
-const KEYS = ['p', 's', 't', 'e', 'b', 'x', 'u'];
+const CORE = ['p', 's', 't', 'e', 'b', 'x', 'u'];
+// Body parts; the slider only appears if the vehicle model has variants of that part.
+const PARTS = [['sp', 'Spoiler'], ['fb', 'Front bumper'], ['rb', 'Rear bumper'], ['sk', 'Side skirts'],
+               ['ex', 'Exhaust'], ['gr', 'Grille'], ['hd', 'Hood'], ['rf', 'Roof']];
+const KEYS = CORE.concat(PARTS.map(([k]) => k));
+
+for (const [k, name] of PARTS) {
+  $('parts').insertAdjacentHTML('beforeend',
+    `<div id="row-${k}" class="hidden"><label>${name} <output id="${k}Val"></output></label>` +
+    `<input id="${k}" type="range" min="0" max="0" step="1" value="0"></div>`);
+}
 const LABELS = { t: ['Stock', 'Pure black', 'Dark smoke', 'Light smoke', 'Stock tint', 'Limo', 'Green'],
                  e: ['Stock', 'Level 1', 'Level 2', 'Level 3', 'Level 4'],
                  b: ['Stock', 'Street', 'Sport', 'Race'],
@@ -25,7 +35,7 @@ function write(mods) {
   for (const part of mods.split(';')) {
     const [k, v] = part.split('=');
     if (!KEYS.includes(k)) continue;
-    if (k === 'u') $('u').checked = v === '1'; else $(k).value = v;
+    if (k === 'u') $('u').checked = v === '1'; else $(k).value = Math.min(Number(v), Number($(k).max));
   }
   labels();
 }
@@ -33,6 +43,7 @@ function write(mods) {
 function labels() {
   for (const k of ['p', 's']) $(k + 'Val').textContent = $(k).value;
   for (const k of ['t', 'e', 'b', 'x']) $(k + 'Val').textContent = LABELS[k][$(k).value] ?? $(k).value;
+  for (const [k] of PARTS) $(k + 'Val').textContent = $(k).value === '0' ? 'Stock' : 'Style ' + $(k).value;
 }
 
 let timer = null;
@@ -56,6 +67,16 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preven
 window.addEventListener('message', ({ data }) => {
   if (data.type === 'open') {
     $('plate').textContent = data.plate;
+    const caps = data.caps || {};
+    let any = false;
+    for (const [k] of PARTS) {
+      const n = caps[k] || 0;
+      $(k).max = n;
+      $(k).value = 0;
+      $('row-' + k).classList.toggle('hidden', n === 0);
+      any = any || n > 0;
+    }
+    $('bodySection').classList.toggle('hidden', !any);
     write(data.mods || 'p=0;s=0;t=0;e=0;b=0;x=0;u=0');
     $('cost').textContent = money(0);
     $('discount').classList.add('hidden');

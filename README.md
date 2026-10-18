@@ -97,7 +97,7 @@ Vehicle customisation with a live preview, where the server prices and saves eve
   Customised vehicles keep their look every time they are taken out.
 - **Cross-resource discount.** A mechanic on duty (`jobs-cs`) pays 20% less; if `jobs-cs` isn't
   running there is simply no discount.
-- Customisable: primary and secondary colour, window tint, engine / brakes / transmission levels, turbo.
+- Customisable: primary and secondary colour, window tint, engine / brakes / transmission levels, turbo, and body parts (spoiler, bumpers, side skirts, exhaust, grille, hood, roof). Body sliders only appear for parts the vehicle model actually has.
 
 Commands: `/setcustoms` (admin) places a bay where you stand; drive in as the driver and press E.
 

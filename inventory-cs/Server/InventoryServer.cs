@@ -242,6 +242,9 @@ namespace Inventory.Server
                     MarkDirty(lic, new[] { slot });
                 }
                 TriggerClientEvent(p, "inv:effect", item); // the server decided; the client only plays the effect
+                // Server-side announcement other resources can react to (e.g. needs-cs restoring hunger).
+                // The inventory doesn't know or care who listens.
+                TriggerEvent("inventory:itemUsed", int.Parse(p.Handle), item);
                 SendState(p, inv);
             });
         }

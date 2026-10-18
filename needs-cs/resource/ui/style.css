@@ -1,0 +1,54 @@
+:root {
+  --bg: rgba(18, 22, 28, .78);
+  --line: #2a3340;
+  --text: #e8edf3;
+  --muted: #8b97a8;
+  --food: #ffb347;
+  --water: #4a9eff;
+  --danger: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+/* Always-on HUD: it never takes focus, so it can't capture the mouse or keyboard. */
+body {
+  margin: 0;
+  height: 100vh;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  pointer-events: none;
+  user-select: none;
+}
+
+.hidden { display: none; }
+
+#hud {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.need {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 190px;
+  padding: 5px 9px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.name { width: 38px; color: var(--muted); }
+.bar { flex: 1; height: 6px; background: #0b0e12; border-radius: 3px; overflow: hidden; }
+.bar div { height: 100%; width: 0; transition: width .4s; }
+#hungerFill { background: var(--food); }
+#thirstFill { background: var(--water); }
+.value { width: 24px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.need.low .bar div { background: var(--danger); }
+.need.low .value { color: var(--danger); }

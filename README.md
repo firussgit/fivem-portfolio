@@ -7,6 +7,7 @@ self-contained resource you can drop into `resources/`.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes |
+| [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
 | [`jobs-cs`](jobs-cs) | C# + MySQL | Jobs, grades, duty and paychecks paid through a bank export |
@@ -63,14 +64,38 @@ claim a car it doesn't own.
   The server resolves the real entity, reads its plate, checks that this player took that
   plate out, and only then stores and deletes it.
 - **Whitelisted models, capped garage size, rate limiting, clamped inputs.**
+- **Vehicle controls.** `L` locks/unlocks, `K` toggles the engine, `/locate` shows where your
+  vehicles are (blips plus a GPS waypoint to the nearest). The client sends only *which* vehicle;
+  the server resolves the real entity, checks it carries a plate this player took out, checks
+  distance (or that they're sitting in it, for the engine), flips its own record of the state and
+  tells the client what to apply. Positions for `/locate` are read from the real entities on the server.
 - **Clean state.** Cars of a player who disconnects, and every car after a server restart,
   go back to the garage instead of staying marked "out".
 
-Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`.
+Commands: `/givecar <model>` (admin), `/garage`, `/takeout <id>`, `/park`, `/locate`, `/lock` (L), `/engine` (K).
 
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync (`+set onesync on`).
 Build with `./garage-cs/deploy.ps1`.
 
+## needs-cs
+
+Hunger and thirst, built to react to other resources without depending on them.
+
+- **Server-owned numbers.** The server decays hunger and thirst on a timer, applies item effects,
+  decides when the player is hurt (starving, dehydrated, or both) and persists the values. The
+  client only draws the HUD and applies the damage it's told to.
+- **Decoupled integration.** When an item is used, `inventory-cs` raises a server event
+  (`inventory:itemUsed`). `needs-cs` listens and decides what that item does, so the inventory
+  knows nothing about needs and new effects need no inventory change.
+- **Safe loading and saving.** One in-memory copy per online player (concurrent loads reuse it),
+  values clamped to 0-100, written on a timer, on disconnect and on resource stop.
+- **Exports:** `getNeeds`, `addNeeds` for other resources.
+- Decay interval is configurable: `set needs_tick_seconds 60`.
+
+Commands: `/setneeds <hunger> <thirst>` (admin, for testing). Water and sandwiches from the shop
+restore thirst and hunger.
+
+Requires `oxmysql`. Build with `./needs-cs/deploy.ps1`.
 ## shops-cs
 
 Shops where a purchase spans two other resources and still can't leave things half done.

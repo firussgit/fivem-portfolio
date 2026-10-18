@@ -26,8 +26,16 @@ namespace Garage.Server
         readonly Dictionary<string, HashSet<string>> _out = new Dictionary<string, HashSet<string>>(); // license -> plates in the world
         readonly Dictionary<int, long> _lastUse = new Dictionary<int, long>();
 
+        // Live state of vehicles that are out in the world, keyed by plate. The server is the source of truth;
+        // clients are told what to apply. All of it is cleared when a vehicle is parked or its owner leaves.
+        readonly Dictionary<string, int> _netIds = new Dictionary<string, int>(); // plate -> network id
+        readonly HashSet<string> _locked = new HashSet<string>();
+        readonly HashSet<string> _engineOff = new HashSet<string>();
+        const float InteractRange = 15f;
+
         public GarageServer()
         {
+            Cmd("locate", Locate);
             Cmd("givecar", GiveCar);
             Cmd("garage", ListGarage);
             Cmd("takeout", TakeOut);
@@ -154,6 +162,102 @@ namespace Garage.Server
 
         // ---------- events from the client ----------
 
+        // The client reports the network id of the vehicle it just spawned. We only accept it if the real
+        // entity carries the plate this player legitimately took out.
+        [EventHandler("garage:spawned")]
+        void OnSpawned([FromSource] Player p, int netId, string plate)
+        {
+            string license = p == null ? null : License(p);
+            if (license == null || plate == null || !Track(license).Contains(plate)) return;
+
+            int entity = NetworkGetEntityFromNetworkId(netId);
+            if (entity == 0 || !DoesEntityExist(entity)) return;
+            if ((GetVehicleNumberPlateText(entity) ?? "").Trim() != plate) return;
+
+            _netIds[plate] = netId;
+        }
+
+        [EventHandler("garage:lock")]
+        void OnLock([FromSource] Player p, int netId)
+        {
+            if (p == null || RateLimited(int.Parse(p.Handle))) return;
+            string plate;
+            int entity = OwnedVehicle(p, netId, out plate);
+            if (entity == 0) { Say(p, "You don't have the keys to that vehicle."); return; }
+
+            // The player must actually be near it (server-side position).
+            int ped = GetPlayerPed(p.Handle);
+            if (ped == 0 || Vector3.Distance(GetEntityCoords(ped), GetEntityCoords(entity)) > InteractRange) { Say(p, "You are too far from the vehicle."); return; }
+
+            bool nowLocked = !_locked.Contains(plate);
+            if (nowLocked) _locked.Add(plate); else _locked.Remove(plate);
+
+            TriggerClientEvent(p, "garage:applyLock", netId, nowLocked);
+            Say(p, $"[{plate}] {(nowLocked ? "locked" : "unlocked")}.");
+        }
+
+        [EventHandler("garage:engine")]
+        void OnEngine([FromSource] Player p, int netId)
+        {
+            if (p == null || RateLimited(int.Parse(p.Handle))) return;
+            string plate;
+            int entity = OwnedVehicle(p, netId, out plate);
+            if (entity == 0) { Say(p, "You don't have the keys to that vehicle."); return; }
+
+            // Only the person sitting in that vehicle can work its engine.
+            int ped = GetPlayerPed(p.Handle);
+            if (ped == 0 || GetVehiclePedIsIn(ped, false) != entity) { Say(p, "You need to be inside the vehicle."); return; }
+
+            bool nowOn = _engineOff.Contains(plate);
+            if (nowOn) _engineOff.Remove(plate); else _engineOff.Add(plate);
+
+            TriggerClientEvent(p, "garage:applyEngine", netId, nowOn);
+            Say(p, $"[{plate}] engine {(nowOn ? "on" : "off")}.");
+        }
+
+        // Resolves a client-supplied network id to a real vehicle entity owned (taken out) by this player.
+        int OwnedVehicle(Player p, int netId, out string plate)
+        {
+            plate = null;
+            string license = License(p);
+            if (license == null) return 0;
+
+            int entity = NetworkGetEntityFromNetworkId(netId);
+            if (entity == 0 || !DoesEntityExist(entity)) return 0;
+
+            plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
+            return Track(license).Contains(plate) ? entity : 0;
+        }
+
+        // Where are my vehicles? Positions are read from the real entities on the server.
+        void Locate(Player p, List<object> args)
+        {
+            string license = License(p);
+            if (license == null) return;
+
+            var entries = new List<string>();
+            foreach (var plate in Track(license))
+            {
+                int netId;
+                if (!_netIds.TryGetValue(plate, out netId)) continue;
+                int entity = NetworkGetEntityFromNetworkId(netId);
+                if (entity == 0 || !DoesEntityExist(entity)) continue;
+
+                var pos = GetEntityCoords(entity);
+                entries.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1:F1},{2:F1},{3:F1}", plate, pos.X, pos.Y, pos.Z));
+            }
+
+            if (entries.Count == 0) { Say(p, "None of your vehicles are out in the world (see /garage)."); return; }
+            TriggerClientEvent(p, "garage:locate", string.Join(";", entries));
+        }
+
+        void ForgetVehicle(string plate)
+        {
+            _netIds.Remove(plate);
+            _locked.Remove(plate);
+            _engineOff.Remove(plate);
+        }
+
         [EventHandler("garage:park")]
         void OnPark([FromSource] Player p, int netId, int engine, int body)
         {
@@ -174,6 +278,7 @@ namespace Garage.Server
                {
                    if (affected != 1) { Say(p, "Could not store that vehicle."); return; }
                    Track(license).Remove(plate);
+                   ForgetVehicle(plate);
                    if (DoesEntityExist(entity)) DeleteEntity(entity);
                    Say(p, $"[{plate}] stored in your garage.");
                    Debug.WriteLine($"[garage] {p.Name} parked [{plate}] (engine {engine}, body {body})");
@@ -192,7 +297,10 @@ namespace Garage.Server
             if (_out.TryGetValue(license, out var plates))
             {
                 foreach (var plate in plates)
+                {
+                    ForgetVehicle(plate);
                     Db("UPDATE player_vehicles SET state = 1 WHERE plate = ? AND owner = ?", new object[] { plate, license }, _ => { });
+                }
                 _out.Remove(license);
             }
         }

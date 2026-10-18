@@ -32,6 +32,9 @@ namespace Bank.Client
             RegisterCommand("atmdebug", new Action<int, System.Collections.Generic.List<object>, string>((s, a, r) => DebugAtm()), false);
             RegisterNui();
             // Escape hatches for the cursor.
+            // Admin tool: report the ATM props in the loaded area so the server can build its location list.
+            RegisterCommand("atmscan", new Action<int, List<object>, string>((s, a, r) => ScanAtms()), false);
+
             // /uifix always releases the cursor.
             RegisterCommand("uifix", new Action<int, List<object>, string>((s, a, r) => ReleaseCursor()), false);
             Tick += OnTick;
@@ -137,6 +140,25 @@ namespace Bank.Client
                 if (d < distance) { distance = d; model = AtmModels[i]; }
             }
             return model != null;
+        }
+
+        void ScanAtms()
+        {
+            var me = Game.PlayerPed.Position;
+            var found = new List<string>();
+
+            foreach (var handle in GetGamePool("CObject"))
+            {
+                int obj = (int)handle;
+                if (Array.IndexOf(_hashes, unchecked((int)GetEntityModel(obj))) < 0) continue;
+
+                var c = GetEntityCoords(obj, true);
+                if (Vector3.Distance(me, c) > 350f) continue;
+                found.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F2},{1:F2},{2:F2}", c.X, c.Y, c.Z));
+            }
+
+            TriggerEvent("chat:addMessage", new { args = new[] { "ATM", $"Found {found.Count} ATM prop(s) nearby, sending to server..." } });
+            if (found.Count > 0) TriggerServerEvent("bank:atmScan", string.Join(";", found));
         }
 
         void DebugAtm()

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using CitizenFX.Core;
 using static CitizenFX.Core.Native.API;
 
@@ -14,6 +16,12 @@ namespace Bank.Server
         const int StartingCash = 500;
         const int MaxAmount = 1000000;
         const int MaxCredit = 100000; // per call limit for the addBank export
+        const float AtmRange = 3.5f;  // how close (metres) a player must be to a registered ATM
+        const string AtmFile = "atms.txt";
+
+        // Known ATM positions, loaded from atms.txt (one "x,y,z" per line). The server can't inspect
+        // world props, so it keeps its own list and checks the player's real position against it.
+        readonly List<Vector3> _atms = new List<Vector3>();
         const long CooldownMs = 500;
 
         readonly Dictionary<string, Account> _accounts = new Dictionary<string, Account>();
@@ -25,6 +33,8 @@ namespace Bank.Server
             Cmd("deposit", (p, a) => Move(p, a, toBank: true));
             Cmd("withdraw", (p, a) => Move(p, a, toBank: false));
             Cmd("transfer", Transfer);
+
+            LoadAtms();
 
             // Server-side export for other resources (e.g. paychecks). Clients can't call server exports.
             Exports.Add("addBank", new Func<int, int, string, bool>(AddBank));
@@ -77,6 +87,7 @@ namespace Bank.Server
 
         void MoveAmount(Player p, int amount, bool toBank)
         {
+            if (!RequireAtm(p)) return;
             var acc = Get(p);
             if (acc == null) return;
 
@@ -108,6 +119,7 @@ namespace Bank.Server
 
         void TransferAmount(Player p, int targetId, int amount)
         {
+            if (!RequireAtm(p)) return;
             var target = Players[targetId];
             if (target == null) { Say(p, "That player is not online."); return; }
             if (target.Handle == p.Handle) { Say(p, "You can't transfer to yourself."); return; }
@@ -125,6 +137,80 @@ namespace Bank.Server
             Log(p, $"transfer->{target.Name}", amount);
             Say(p, $"Sent ${amount} to {target.Name}.");
             Say(target, $"{p.Name} sent you ${amount}.");
+        }
+
+        // ---------- ATM locations ----------
+
+        // The player's position comes from the server (OneSync), never from the client.
+        bool AtAtm(Player p)
+        {
+            int ped = GetPlayerPed(p.Handle);
+            if (ped == 0) return false;
+            var pos = GetEntityCoords(ped);
+            return _atms.Any(a => Vector3.Distance(pos, a) <= AtmRange);
+        }
+
+        bool RequireAtm(Player p)
+        {
+            if (AtAtm(p)) return true;
+            Say(p, _atms.Count == 0
+                ? "No ATM locations are registered yet. An admin must run /atmscan next to ATMs."
+                : "You need to be at an ATM to do that.");
+            return false;
+        }
+
+        // Admin-only: the client reports ATM props it can see; we keep the ones near the admin.
+        [EventHandler("bank:atmScan")]
+        void OnAtmScan([FromSource] Player p, string payload)
+        {
+            if (p == null) return;
+            if (!IsPlayerAceAllowed(p.Handle, "bank.admin")) { Say(p, "You are not allowed to use that."); return; }
+
+            int ped = GetPlayerPed(p.Handle);
+            var origin = GetEntityCoords(ped);
+            int added = 0;
+
+            foreach (var item in (payload ?? "").Split(';').Take(300))
+            {
+                var v = ParseVec(item);
+                if (v == null || Vector3.Distance(origin, v.Value) > 400f) continue; // only what's near the admin
+                if (_atms.Any(a => Vector3.Distance(a, v.Value) < 1.5f)) continue;   // already known
+                _atms.Add(v.Value);
+                added++;
+            }
+
+            if (added > 0) SaveAtms();
+            Say(p, $"ATM scan: {added} new, {_atms.Count} registered in total.");
+        }
+
+        void LoadAtms()
+        {
+            _atms.Clear();
+            string raw = LoadResourceFile(GetCurrentResourceName(), AtmFile);
+            if (string.IsNullOrEmpty(raw)) return;
+            foreach (var line in raw.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var v = ParseVec(line);
+                if (v != null) _atms.Add(v.Value);
+            }
+            Debug.WriteLine($"[bank] {_atms.Count} ATM location(s) loaded");
+        }
+
+        void SaveAtms()
+        {
+            var lines = _atms.Select(a => string.Join(",", new[] { a.X, a.Y, a.Z }.Select(f => f.ToString("F2", CultureInfo.InvariantCulture))));
+            SaveResourceFile(GetCurrentResourceName(), AtmFile, string.Join("\n", lines), -1);
+        }
+
+        static Vector3? ParseVec(string s)
+        {
+            var parts = (s ?? "").Trim().Split(',');
+            if (parts.Length != 3) return null;
+            float x, y, z;
+            if (!float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x)
+                || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y)
+                || !float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out z)) return null;
+            return new Vector3(x, y, z);
         }
 
         // ---------- helpers ----------

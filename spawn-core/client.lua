@@ -5,13 +5,21 @@ AddEventHandler('playerSpawned', function()
     TriggerServerEvent('spawncore:requestPos')
 end)
 
+-- Solid ground used when a saved position turns out to be a hole in the map.
+local SAFE = vector3(215.0, -810.0, 30.7) -- Legion Square
+
+local function placePed(ped, pos, heading)
+    RequestCollisionAtCoord(pos.x, pos.y, pos.z)
+    SetEntityCoordsNoOffset(ped, pos.x, pos.y, pos.z, false, false, false)
+    if heading then SetEntityHeading(ped, heading) end
+end
+
 RegisterNetEvent('spawncore:applyPos', function(pos)
-    if pos then
+    -- Below sea level is never a walkable position; ignore it and keep the normal spawn.
+    if pos and pos.z > 0.0 then
         local ped = PlayerPedId()
-        RequestCollisionAtCoord(pos.x, pos.y, pos.z)
         FreezeEntityPosition(ped, true)
-        SetEntityCoordsNoOffset(ped, pos.x, pos.y, pos.z, false, false, false)
-        SetEntityHeading(ped, pos.h or 0.0)
+        placePed(ped, pos, pos.h or 0.0)
 
         -- Wait (max ~3s) for the ground to stream in so we don't fall through the map.
         local waited = 0
@@ -19,10 +27,66 @@ RegisterNetEvent('spawncore:applyPos', function(pos)
             Wait(100)
             waited = waited + 100
         end
+
+        -- A saved position can be inside a building or over a map hole (the PDM showroom
+        -- is one). Unfreeze and watch: if the ped keeps falling, move it to solid ground.
         FreezeEntityPosition(ped, false)
+        local z0 = GetEntityCoords(ped).z
+        local waited2 = 0
+        while waited2 < 1500 do
+            Wait(100)
+            waited2 = waited2 + 100
+
+            local c = GetEntityCoords(ped)
+            local veh = GetVehiclePedIsIn(ped, false)
+            local inAir = IsPedFalling(ped) or (veh ~= 0 and IsEntityInAir(veh))
+            if not inAir then break end
+
+            if c.z < z0 - 5.0 then
+                FreezeEntityPosition(ped, true)
+                placePed(ped, SAFE, 0.0)
+                Wait(300)
+                FreezeEntityPosition(ped, false)
+                TriggerEvent('chat:addMessage', { args = {
+                    'Spawn', 'Your saved position was not on solid ground; moved to Legion Square. Use /stuck if it happens again.'
+                } })
+                break
+            end
+        end
     end
     ready = true
 end)
+
+-- /stuck: escape hatch for a hole in the map. Fixed destination, so it cannot be used
+-- to teleport anywhere useful.
+RegisterCommand('stuck', function()
+    local ped = PlayerPedId()
+    if IsEntityDead(ped) then return end
+
+    FreezeEntityPosition(ped, true)
+    RequestCollisionAtCoord(SAFE.x, SAFE.y, SAFE.z)
+
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh ~= 0 then SetPedCoordsKeepVehicle(ped, SAFE.x, SAFE.y, SAFE.z)
+    else SetEntityCoordsNoOffset(ped, SAFE.x, SAFE.y, SAFE.z, false, false, false) end
+
+    SetEntityVelocity(ped, 0.0, 0.0, 0.0)
+    if veh ~= 0 then SetEntityVelocity(veh, 0.0, 0.0, 0.0) end
+
+    Wait(400)
+    FreezeEntityPosition(ped, false)
+    TriggerEvent('chat:addMessage', { args = { 'Spawn', 'Moved to Legion Square.' } })
+end, false)
+
+-- A saved position is used as the next spawn, so only persist a position that is on
+-- the ground and above sea level. Mid-fall positions (a hole in the map, a parachute
+-- jump) and underwater dives would otherwise respawn the player in the void.
+local function canSave(ped, c)
+    if IsEntityDead(ped) or c.z < 0.0 or IsPedFalling(ped) then return false end
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh ~= 0 and IsEntityInAir(veh) then return false end
+    return true
+end
 
 CreateThread(function()
     while true do
@@ -30,7 +94,9 @@ CreateThread(function()
         local ped = PlayerPedId()
         if ready and not IsEntityDead(ped) then
             local c = GetEntityCoords(ped)
-            TriggerServerEvent('spawncore:savePos', c.x, c.y, c.z, GetEntityHeading(ped))
+            if canSave(ped, c) then
+                TriggerServerEvent('spawncore:savePos', c.x, c.y, c.z, GetEntityHeading(ped))
+            end
         end
     end
 end)

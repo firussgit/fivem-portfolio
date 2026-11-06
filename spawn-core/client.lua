@@ -46,10 +46,10 @@ RegisterCommand('relog', function()
 end, false)
 
 -- /car [model]  e.g. /car sultan
+-- The server checks spawn.admin first, then asks this client to spawn the vehicle.
 local lastCar
 
-RegisterCommand('car', function(_, args)
-    local name = args[1] or 'adder'
+local function spawnCar(name)
     local model = GetHashKey(name)
 
     if not IsModelInCdimage(model) or not IsModelAVehicle(model) then
@@ -72,4 +72,13 @@ RegisterCommand('car', function(_, args)
     lastCar = CreateVehicle(model, c.x, c.y, c.z, GetEntityHeading(ped), true, false)
     SetPedIntoVehicle(ped, lastCar, -1)
     SetModelAsNoLongerNeeded(model)
+end
+
+RegisterNetEvent('spawncore:spawnCar', function(name)
+    if type(name) ~= 'string' then return end
+    spawnCar(name)
+end)
+
+RegisterCommand('car', function(_, args)
+    TriggerServerEvent('spawncore:requestCar', args[1] or 'adder')
 end, false)

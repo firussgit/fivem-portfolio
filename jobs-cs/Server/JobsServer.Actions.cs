@@ -71,6 +71,22 @@ namespace Jobs.Server
         //  Police: fine
         // ==================================================================
 
+        // Tell dispatch-cs that a server-validated action dealt with the caller's own call. It is
+        // an optional server-only export: without dispatch-cs the field action still works, and
+        // dispatch owns the "call resolved" message so it can happen after the next tick.
+        void ResolveDispatchCall(Player actor, string callerLicense, string category)
+        {
+            if (actor == null || string.IsNullOrEmpty(callerLicense)) return;
+            try
+            {
+                Exports["dispatch-cs"].resolveFromAction(Src(actor), callerLicense, category);
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("[jobs] dispatch-cs unavailable, call not resolved: " + e.Message);
+            }
+        }
+
         void FineCommand(Player p, List<object> args)
         {
             With(p, s =>
@@ -139,6 +155,7 @@ namespace Jobs.Server
                 Say(p, $"Fined {target.Name} ${amount}: {reason}");
                 Say(target, $"You were fined ${amount} by {p.Name}: {reason}");
                 LogAction("fine", p, targetLicense, CleanText(target.Name, 60), amount, reason);
+                ResolveDispatchCall(p, targetLicense, "police");
                 Debug.WriteLine($"[jobs] {p.Name} fined {target.Name} ${amount} ({reason})");
             });
         }
@@ -235,6 +252,7 @@ namespace Jobs.Server
                     : $"You revived {target.Name}, but the bank could not pay the bonus.");
 
                 LogAction("revive", medic, targetLicense, CleanText(target.Name, 60), _revivePay, "revived at scene");
+                ResolveDispatchCall(medic, targetLicense, "medical");
                 Debug.WriteLine($"[jobs] {medic.Name} revived {target.Name} (paid={paid})");
             }
             catch (Exception e)
@@ -364,6 +382,7 @@ namespace Jobs.Server
                         LogAction("impound", p, ownerLicense,
                             ownerPlayer != null ? CleanText(ownerPlayer.Name, 60) : "", 0,
                             stolen ? $"recovered stolen {model} [{plate}]" : $"{model} [{plate}]");
+                        ResolveDispatchCall(p, ownerLicense, "police");
                         Debug.WriteLine($"[jobs] {p.Name} impounded [{plate}] ({model}, stolen={stolen})");
                     });
                 });

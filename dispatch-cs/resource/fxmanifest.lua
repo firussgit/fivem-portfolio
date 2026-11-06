@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Dispatch radio: 911/912 calls from the phone, on-duty police/EMS claim and respond, server-validated positions and pay'
-version '0.1.0'
+description 'Dispatch radio: 911/912 calls, on-duty police/EMS response, server-validated positions, payouts and field-action auto-resolution'
+version '0.2.0'
 
 dependencies {
     'oxmysql',

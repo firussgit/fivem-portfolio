@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Jobs, grades, duty, paychecks, courier/taxi work and police/EMS/mechanic field actions in C#; pays through bank-cs'
-version '0.4.0'
+description 'Jobs, grades, duty, paychecks, courier/taxi work and police/EMS/mechanic field actions in C#; pays through bank-cs and closes dispatch calls'
+version '0.5.0'
 
 dependencies {
     'oxmysql',

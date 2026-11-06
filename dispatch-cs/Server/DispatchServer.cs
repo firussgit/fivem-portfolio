@@ -112,6 +112,7 @@ namespace Dispatch.Server
             // Server-only exports: phone-cs creates and cancels calls through these, never a client event.
             Exports.Add("createCall", new Func<int, string, string, bool>(CreateCall));
             Exports.Add("cancelCall", new Func<int, bool>(CancelCall));
+            Exports.Add("resolveFromAction", new Func<int, string, string, bool>(ResolveFromAction));
 
             CreateTable();
             Tick += ExpireLoop;
@@ -251,6 +252,91 @@ namespace Dispatch.Server
 
             CloseSystem(call, "cancelled", 0, $"You cancelled call #{call.Id}.");
             return true;
+        }
+
+        // ==================================================================
+        //  Field-action integration (jobs-cs)
+        // ==================================================================
+
+        /// <summary>
+        /// Called by jobs-cs after it has validated a field action on the caller: a police fine or
+        /// impound resolves the caller's police call, and an EMS revive resolves their medical call.
+        /// The action already checked job, duty and proximity to the target, so this only has to
+        /// match the caller's active call and make sure another unit isn't handling it. The actual
+        /// close is deferred by a tick so dispatch can safely call back into jobs-cs for the duty
+        /// check and the console broadcast. A server-only export, so a client can never call it.
+        /// </summary>
+        bool ResolveFromAction(int actorSrc, string callerLicense, string category)
+        {
+            var actor = Players[actorSrc];
+            if (actor == null) return false;
+
+            category = NormalizeCategory(category);
+            if (category == null || string.IsNullOrEmpty(callerLicense)) return false;
+
+            string actorLicense = License(actor);
+            if (actorLicense == null) return false;
+
+            var call = _calls.Values.FirstOrDefault(c =>
+                c.CallerLicense == callerLicense && c.Category == category);
+            if (call == null) return false;
+
+            // Another unit is handling it: don't close their call or collect their payout.
+            if (call.ClaimedBy != null && call.ClaimedBy != actorLicense) return false;
+
+            _ = ResolveFromActionDeferred(call, actorSrc, actorLicense, Clean(actor.Name, 60), category);
+            return true;
+        }
+
+        async Task ResolveFromActionDeferred(CallState call, int actorSrc, string actorLicense, string actorName, string category)
+        {
+            try
+            {
+                // Let the caller's export call return before dispatch calls jobs-cs again.
+                await Delay(0);
+
+                if (!_calls.ContainsKey(call.Id)) return;
+                if (call.ClaimedBy != null && call.ClaimedBy != actorLicense) return;
+
+                // Defence in depth: the action already proved job and duty, but only the matching
+                // on-duty department may resolve the call.
+                if (!OnDuty(actorSrc, CategoryJob(category))) return;
+
+                bool autoClaim = call.ClaimedBy == null;
+                string callerMessage = category == Police
+                    ? $"Your call #{call.Id} was resolved: an officer dealt with the offender."
+                    : $"Your call #{call.Id} was resolved: EMS treated you.";
+
+                // One atomic update: an unclaimed call is taken and closed in the same step, and the
+                // WHERE clause makes sure another unit cannot claim it between the read and this write.
+                Db("UPDATE dispatch_calls SET status = 'closed', outcome = 'resolved', closed_at = NOW(), payout = ?, " +
+                   "claimed_by = COALESCE(claimed_by, ?), claimed_name = COALESCE(claimed_name, ?), " +
+                   "claimed_at = COALESCE(claimed_at, NOW()) " +
+                   "WHERE id = ? AND status <> 'closed' AND (claimed_by IS NULL OR claimed_by = ?)",
+                   new object[] { _pay, actorLicense, actorName, call.Id, actorLicense }, affected =>
+                   {
+                       if (affected != 1) return;
+
+                       if (autoClaim)
+                       {
+                           call.ClaimedBy = actorLicense;
+                           call.ClaimedName = actorName;
+                           call.ClaimedAt = GetGameTimer();
+                           call.ClaimPos = call.Pos;
+                       }
+
+                       call.Status = "closed";
+                       FinalizeClose(call, "resolved", _pay, callerMessage);
+
+                       // FinalizeClose already tells the unit when a zero-payout call closes.
+                       var actor = _pay > 0 ? FindPlayer(actorLicense) : null;
+                       if (actor != null) Say(actor, $"Call #{call.Id} resolved by your field action.");
+                   });
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("[dispatch] field-action resolve failed: " + e.Message);
+            }
         }
 
         // ==================================================================

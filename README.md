@@ -65,14 +65,17 @@ and answers with the new truth.
 - **Exports** (server-side only, so clients can't call them): `bank-cs` exposes `addMoney`,
   `removeMoney`, `addBank`, `getBalances`; `inventory-cs` exposes `addItem`, `removeItem`,
   `hasItem`, `getCount`, `canAdd`; `jobs-cs` exposes `getJob`, `getGrade`, `isOnDuty`;
-  `needs-cs` exposes `getNeeds`, `addNeeds`; `dispatch-cs` exposes `createCall`, `cancelCall`.
+  `needs-cs` exposes `getNeeds`, `addNeeds`; `dispatch-cs` exposes `createCall`, `cancelCall`,
+  `resolveFromAction`.
 - **Events:** `inventory-cs` raises `inventory:itemUsed` (needs-cs reacts to it);
   `garage-cs` raises `garage:vehicleSpawned` on the client (customs-cs reacts to it);
   `jobs-cs` raises `jobs:dutyChanged` and `jobs:jobChanged` on the server
   (dispatch-cs releases the unit's calls when they stop being eligible).
 - **Dispatch:** `phone-cs` creates 911/912 calls through dispatch-cs' server-only `createCall`
   export. Dispatch asks `jobs-cs` who is on duty, offers the call only to the matching
-  department, and pays a resolved call through `bank-cs`.
+  department, and pays a resolved call through `bank-cs`. In the other direction, a validated
+  fine, impound or revive calls dispatch's `resolveFromAction` export to close the caller's own
+  matching call and pay the unit.
 - **Races:** `races-cs` is deliberately standalone: routes, cars, limits and checkpoints live in
   its server code, and the server owns the clock and the checkpoint polling, so it needs
   `oxmysql` but no other portfolio resource.
@@ -294,7 +297,7 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 6. **Jobs.** `/setjob <your id> mechanic 1`, `/duty`, wait for a paycheck, then open customs again: you now get a 20% discount.
 7. **A shift.** `/setjob <your id> courier 0` (or `taxi 0`), `/duty`, drive to the Go Postal / cab hub marked on the map and run `/work`. Follow the GPS stop to stop; the HUD shows the timer, distance and payout. Finish at the last stop to get paid in cash, then try `/work stats`.
 8. **Dispatch.** `/setjob <your id> police 0`, `/duty`, then press **F2** to open the dispatch console. Normally a civilian dials 911 or 912 from the phone's Emergency tab; for a solo test run `/dispatchtest police Robbery in progress` to place a call at your feet. Claim it, mark **En route**, mark **On scene**, then close it as **Resolved**: $150 is paid to your bank. `/dispatchtest medical ...` proves the medical queue is separate.
-9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`.
+9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`. If the fined player (or the impounded car's owner) has an open 911 call, the fine or impound resolves it and pays you the dispatch bonus; an EMS revive does the same for the patient's 912 call.
 10. **A time trial.** Run `/race` for the route list, drive (or teleport with `/car`) to a start point, then `/race downtown`. A `comet2` is spawned and you are seated in it; the server starts the clock only after it has checked the real car model and that you are in it. Follow the gold marker and the GPS route through five checkpoints, then `/top downtown` to see the board. Repeat the route and try to beat your personal best.
 11. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
 12. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
@@ -464,6 +467,12 @@ A dispatch radio that turns a 911 call into a claimable, server-validated job fo
 - **Console.** Press **F2** or `/dispatch`: a focused NUI panel lists the calls the player may see, with
   age, distance, caller, status, and only the actions that are valid for that call. Claiming sets a GPS
   route and a blip that is cleared on release or close. The page renders with `textContent` only.
+- **Field actions close the loop.** When `jobs-cs` completes a server-validated fine, impound or EMS
+  revive, it calls dispatch's server-only `resolveFromAction` export. If the fined player, the
+  impounded car's owner or the revived patient has an active call of the matching category, the
+  call is closed as `resolved` and the unit receives the normal `dispatch_pay_per_call` payout. An
+  unclaimed call is claimed and closed in one atomic update; a call already assigned to another
+  unit is left alone. The field action still works when dispatch isn't running.
 - **Test hook.** `/dispatchtest <police|medical> [message]` (ACE `dispatch.test`) places a synthetic
   call at your feet, so one client can exercise the whole flow; `/dispatchclose <id>` force-closes one.
 
@@ -602,6 +611,12 @@ Jobs with grades, a duty toggle, automatic paychecks, repeatable activities and 
   to the real vehicle before doing anything. Impounding a car flagged `stolen` by the garage
   clears that flag, returns it to the owner's garage and tells both players it was recovered.
   Each action is appended to `job_actions`.
+- **Dispatch closes itself when the action does.** A successful fine or impound calls dispatch-cs'
+  server-only `resolveFromAction` export for the fined player or the car's owner; an EMS revive does
+  the same for the patient's medical call. The call is resolved (and the dispatch payout paid) only
+  if it is that player's own call, of the matching category, and either unclaimed or already
+  assigned to the acting unit. Another unit's call is never taken, and the field action is
+  unaffected when dispatch-cs is not running.
 - **Hubs placed in-game.** `/setworkhub <courier|taxi>` moves a start point to where an admin is
   standing and saves it to `workhubs.txt`, so no coordinates have to be typed by hand.
 - **History, not live state.** Active runs live in memory because they belong to a session; every

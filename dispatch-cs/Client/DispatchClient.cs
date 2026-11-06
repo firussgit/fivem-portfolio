@@ -36,6 +36,7 @@ namespace Dispatch.Client
             EventHandlers["dispatch:unassigned"] += new Action<int>(OnUnassigned);
             EventHandlers["dispatch:new"] += new Action<string>(OnNewCall);
             EventHandlers["dispatch:denied"] += new Action(OnDenied);
+            EventHandlers["dispatch:jobChanged"] += new Action(OnJobChanged);
 
             RegisterCommand("dispatch", new Action<int, List<object>, string>((src, args, raw) => Toggle()), false);
             RegisterKeyMapping("dispatch", "Open / close dispatch", "keyboard", "F2");
@@ -86,6 +87,15 @@ namespace Dispatch.Client
         {
             if (_open) Close();
             Notify("Dispatch requires on-duty police or EMS.");
+        }
+
+        // Changing job takes you off duty and releases any call you held, but it is not a refusal.
+        // Close the console quietly (only if it was open) and tell the player what to do next.
+        void OnJobChanged()
+        {
+            if (!_open) return;
+            Close();
+            Notify("Job changed - dispatch closed. Use /duty, then F2.");
         }
 
         // ---------- GPS for the claimed call ----------

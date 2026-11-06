@@ -86,6 +86,7 @@ namespace Dispatch.Server
         readonly Dictionary<int, CallState> _calls = new Dictionary<int, CallState>();
         readonly Dictionary<string, long> _lastCall = new Dictionary<string, long>();
         readonly HashSet<string> _calling = new HashSet<string>();
+        readonly HashSet<string> _cancelPending = new HashSet<string>(); // cancelled while the insert was in flight
 
         readonly int _pay;
         readonly float _sceneRadius;
@@ -224,6 +225,15 @@ namespace Dispatch.Server
                         };
                         _calls[call.Id] = call;
 
+                        // Cancel arrived while this insert was in flight: close it now and never
+                        // offer it to units.
+                        if (_cancelPending.Remove(callerLicense))
+                        {
+                            Debug.WriteLine($"[dispatch] call #{call.Id} {category} cancelled before it was offered");
+                            CloseSystem(call, "cancelled", 0, $"You cancelled call #{call.Id}.");
+                            return;
+                        }
+
                         if (actor != null) Say(actor, $"Call #{call.Id} received. Units have your location.");
                         NotifyNew(call);
                         BroadcastStates();
@@ -248,7 +258,20 @@ namespace Dispatch.Server
             if (license == null) return false;
 
             var call = _calls.Values.FirstOrDefault(c => c.CallerLicense == license);
-            if (call == null) { Say(p, "You have no active call."); return false; }
+            if (call == null)
+            {
+                // The 911 request can still be waiting for its database insert, so the caller may
+                // hit Cancel a moment before the call exists. Remember it and close the call the
+                // instant it appears instead of leaving a phantom open call behind.
+                if (_calling.Contains(license))
+                {
+                    _cancelPending.Add(license);
+                    Say(p, "Cancelling your call\u2026");
+                    return true;
+                }
+                Say(p, "You have no active call.");
+                return false;
+            }
 
             CloseSystem(call, "cancelled", 0, $"You cancelled call #{call.Id}.");
             return true;
@@ -508,18 +531,19 @@ namespace Dispatch.Server
         //  State helpers
         // ==================================================================
 
-        bool Eligible(int src) => IsAdmin(src) || OnDuty(src, Police) || OnDuty(src, Medical);
+        // Category strings are not job ids: medical calls belong to the "ems" job. Always map
+        // through CategoryJob before asking jobs-cs who is on duty.
+        bool Eligible(int src) => IsAdmin(src) || OnDuty(src, Police) || OnDuty(src, CategoryJob(Medical));
 
         bool CanView(int src, CallState call)
         {
             if (IsAdmin(src)) return true;
-            return OnDuty(src, call.Category == Police ? Police : Medical);
+            return OnDuty(src, CategoryJob(call.Category));
         }
 
         bool CanClaim(Player p, CallState call)
         {
-            int src = Src(p);
-            return call.Category == Police ? OnDuty(src, Police) : OnDuty(src, Medical);
+            return OnDuty(Src(p), CategoryJob(call.Category));
         }
 
         // dispatch.admin: staff overview (both queues) and moderation. dispatch.test: dev/test hooks.
@@ -542,7 +566,7 @@ namespace Dispatch.Server
         {
             if (IsAdmin(src)) return "admin";
             if (OnDuty(src, Police)) return "police";
-            if (OnDuty(src, Medical)) return "ems";
+            if (OnDuty(src, CategoryJob(Medical))) return "ems";
             return "none";
         }
 
@@ -592,7 +616,7 @@ namespace Dispatch.Server
             {
                 var c = calls[i];
                 bool canClaim = c.Status == "open" && c.CallerLicense != viewerLicense &&
-                    (c.Category == Police ? OnDuty(src, Police) : OnDuty(src, Medical));
+                    OnDuty(src, CategoryJob(c.Category));
                 if (i > 0) sb.Append(',');
                 sb.Append("{\"id\":").Append(c.Id)
                   .Append(",\"category\":").Append(J(c.Category))
@@ -752,7 +776,10 @@ namespace Dispatch.Server
             string license = License(p);
             if (license == null) return;
 
-            TriggerClientEvent(p, "dispatch:denied");
+            // A job change forces the unit off duty (jobs-cs clears the flag), so the console cannot
+            // stay open, but this is not a refusal: close it quietly with its own message instead of
+            // reusing dispatch:denied, which is the "you are not allowed" path.
+            TriggerClientEvent(p, "dispatch:jobChanged");
             foreach (var call in _calls.Values.Where(c => c.ClaimedBy == license).ToList())
                 ReleaseInternal(call, "Your job changed, so the call was released.",
                     "The unit changed job; your call is open again.");
@@ -771,6 +798,7 @@ namespace Dispatch.Server
 
             _lastCall.Remove(license);
             _calling.Remove(license);
+            _cancelPending.Remove(license);
 
             // A unit that disconnects must not keep a call locked forever.
             foreach (var call in _calls.Values.Where(c => c.ClaimedBy == license).ToList())

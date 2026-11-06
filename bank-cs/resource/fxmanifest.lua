@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Banking system in C#: server-authoritative accounts, ATM props, NUI interface'
-version '0.2.0'
+description 'Banking system in C#: server-authoritative accounts, ATM props, loans and credit, NUI interface'
+version '0.3.0'
 
 ui_page 'ui/index.html'
 

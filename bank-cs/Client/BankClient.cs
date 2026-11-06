@@ -29,6 +29,7 @@ namespace Bank.Client
             for (int i = 0; i < AtmModels.Length; i++) _hashes[i] = GetHashKey(AtmModels[i]);
 
             EventHandlers["bank:balance"] += new Action<int, int>(OnBalance);
+            EventHandlers["bank:loans"] += new Action<int, int, int, int, int, int, int, string, int>(OnLoans);
             RegisterCommand("atmdebug", new Action<int, System.Collections.Generic.List<object>, string>((s, a, r) => DebugAtm()), false);
             RegisterNui();
             // Escape hatches for the cursor.
@@ -69,7 +70,7 @@ namespace Bank.Client
             if (!_nearAtm) { if (!releasing) await Delay(100); return; }
 
             BeginTextCommandDisplayHelp("STRING");
-            AddTextComponentSubstringPlayerName("Press ~INPUT_PICKUP~ to check your bank balance");
+            AddTextComponentSubstringPlayerName("Press ~INPUT_PICKUP~ to use the ATM");
             EndTextCommandDisplayHelp(0, false, false, -1);
 
             if (IsControlJustPressed(0, KeyE)) OpenUi();
@@ -104,7 +105,7 @@ namespace Bank.Client
         {
             // Without this, the page's fetch() to https://<resource>/<name> is never delivered to
             // the "__cfx_nui:<name>" event below (this was the stuck-cursor bug: "close" got dropped).
-            foreach (var name in new[] { "close", "deposit", "withdraw", "transfer" })
+            foreach (var name in new[] { "close", "deposit", "withdraw", "transfer", "loanApply", "loanPay" })
                 RegisterNuiCallbackType(name);
 
             EventHandlers["__cfx_nui:close"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) => { CloseUi(); cb("ok"); });
@@ -119,6 +120,14 @@ namespace Bank.Client
             EventHandlers["__cfx_nui:transfer"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
             {
                 TriggerServerEvent("bank:transfer", Convert.ToInt32(d["target"]), Convert.ToInt32(d["amount"])); cb("ok");
+            });
+            EventHandlers["__cfx_nui:loanApply"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
+            {
+                TriggerServerEvent("bank:loanApply", Convert.ToInt32(d["amount"]), Convert.ToInt32(d["days"])); cb("ok");
+            });
+            EventHandlers["__cfx_nui:loanPay"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
+            {
+                TriggerServerEvent("bank:loanPay", Convert.ToInt32(d["amount"])); cb("ok");
             });
         }
 
@@ -177,6 +186,16 @@ namespace Bank.Client
             BeginTextCommandThefeedPost("STRING");
             AddTextComponentSubstringPlayerName($"Cash ~g~${cash}~s~  Bank ~b~${bank}");
             EndTextCommandThefeedPostTicker(false, false);
+        }
+
+        // Loan state is sent by the server after every balance/loan change. `status` is empty when
+        // there is no loan; only the server's own strings ("active"/"defaulted") reach the JSON.
+        void OnLoans(int score, int limit, int rate, int balance, int principal, int installment,
+            int missed, string status, int dueSeconds)
+        {
+            SendNuiMessage($"{{\"type\":\"loans\",\"score\":{score},\"limit\":{limit},\"rate\":{rate}," +
+                $"\"balance\":{balance},\"principal\":{principal},\"installment\":{installment}," +
+                $"\"missed\":{missed},\"status\":\"{status}\",\"dueSeconds\":{dueSeconds}}}");
         }
     }
 }

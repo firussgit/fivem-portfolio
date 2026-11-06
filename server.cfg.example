@@ -28,6 +28,11 @@ set insurance_payout_percent 50       # share of the repair cost paid on an insu
 set insurance_payout_max 2500         # hard cap on one claim settlement
 set insurance_deductible 250          # taken off each claim settlement
 set insurance_claim_cooldown_minutes 30 # minimum gap between claims on the same vehicle
+set bank_loan_min 500                 # smallest loan (bank-cs)
+set bank_loan_max 25000               # hard cap on one loan, on top of the credit tier
+set bank_loan_interval_minutes 1440   # real minutes between instalments (1440 = one day)
+set bank_loan_max_days 30             # longest term, in instalments
+set bank_loan_miss_limit 3            # missed payments before a loan defaults
 set needs_tick_seconds 60             # hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # shop restock (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)

@@ -24,7 +24,7 @@ and answers with the new truth.
 
 | Resource | Language | What it shows |
 |---|---|---|
-| [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
+| [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, loans and credit, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, vehicle keys and sharing, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
 | [`dealer-cs`](dealer-cs) | C# + MySQL + NUI | Player dealership: server-priced showroom, cash/bank purchases, timed rentals, free test drives and condition-based trade-ins |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
@@ -97,6 +97,7 @@ and answers with the new truth.
 | **Anti-teleport checks.** A job stop, a dispatch "on scene" or a race checkpoint only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch, races |
 | **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races, dealer test drives |
 | **Expiry that survives a relog.** A lease is a wall-clock timestamp in the database, and the spawned car is verified like a test car, so closing the game can't freeze or reset the clock. | dealer rentals |
+| **Debt that survives a relog.** Credit and loans are stored next to the balance and settled from wall-clock timestamps, so logging out neither pauses the schedule nor erases what is owed. | bank loans |
 | **Explicit, revocable access.** Sharing a vehicle is a row with a unique `(vehicle, player)` pair, checked again on every key action, not a one-off unlock, so revoking it works while the car is out. | garage keys |
 | **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim, dealer sell, rental start |
 | **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
@@ -167,6 +168,11 @@ set insurance_payout_percent 50       # share of the repair cost paid on an insu
 set insurance_payout_max 2500         # hard cap on one claim settlement
 set insurance_deductible 250          # taken off each claim settlement
 set insurance_claim_cooldown_minutes 30 # minimum gap between claims on the same vehicle
+set bank_loan_min 500                 # smallest loan (bank-cs)
+set bank_loan_max 25000               # hard cap on one loan, on top of the credit tier
+set bank_loan_interval_minutes 1440   # real minutes between instalments (1440 = one day)
+set bank_loan_max_days 30             # longest term, in instalments
+set bank_loan_miss_limit 3            # missed payments before a loan defaults
 set needs_tick_seconds 60             # how often hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # how often shop stock refills (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)
@@ -224,6 +230,9 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/deposit <amount>` | bank-cs | Cash → bank (**at an ATM**) | `/deposit 250` |
 | `/withdraw <amount>` | bank-cs | Bank → cash (**at an ATM**) | `/withdraw 100` |
 | `/transfer <id> <amount>` | bank-cs | Send bank money to a player (**at an ATM**) | `/transfer 3 500` |
+| `/loan` | bank-cs | Shows your credit score, limit and active loan | `/loan` |
+| `/loan apply <amount> [days]` | bank-cs | Takes a loan, depositing it to your bank (**at an ATM**) | `/loan apply 1000 7` |
+| `/loan pay <amount>` | bank-cs | Repays early from your bank (**at an ATM**) | `/loan pay 500` |
 | `/garage` | garage-cs | Lists your stored vehicles with their ids | `/garage` |
 | `/takeout <vehicle id>` | garage-cs | Spawns a stored vehicle you own or have a key to | `/takeout 4` |
 | `/park` | garage-cs | Stores the vehicle you're in or next to (a shared car returns to its owner) | `/park` |
@@ -334,7 +343,8 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 13. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
 14. **A dealership.** Go to Premium Deluxe Motorsport (the yellow car blip), stand on the marker and press **E**. Browse the server-priced catalogue, then try **Test drive** for a free 90-second car, or buy with **Cash** / **Bank**: the bank charge and the garage insert happen on the server, and the car is handed over through the garage's normal spawn path. **Rent a car** leases the same models for 20 minutes: the fee is kept and the deposit comes back when you return the car at the showroom (`/returncar`). Open **Sell your car** to trade in a stored car; the offer depends on its engine and body condition. The sales and lease history is in `dealer_sales` and `rentals`.
 15. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-16. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+16. **A loan.** At an ATM, `/loan` shows your credit score (650 to start) and limit. `/loan apply 1000 7` deposits $1,000 and sets up seven payments; `/loan` shows what is left and when the next one is due. Payments are taken from your bank automatically (`bank_loan_interval_minutes`, 1440 = daily by default), or repay early with `/loan pay 500`. Three missed payments default the loan and cut your limit until it is repaid. Set `bank_loan_interval_minutes 1` to watch the schedule in a minute.
+17. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -351,8 +361,25 @@ A banking system built around one rule: **the client is never trusted**.
   existence, model and distance, and shows a prompt; `E` opens the interface.
 - **NUI.** A small dependency-free HTML/CSS/JS UI. It renders state and posts intent back
   through NUI callbacks; it holds no authority.
-- **Persistence.** Accounts are stored per Rockstar license with resource KVP, so they
-  survive restarts without needing a database.
+- **Persistence.** Accounts, credit and loans are stored per Rockstar license with resource KVP,
+  so they survive restarts without needing a database.
+- **Loans start from a server-owned score.** Every account has a credit score (650 to start,
+  300–850). The score picks the limit ($1,000 up to $25,000) and the interest tier (24% down to
+  6%); the client can only ask, and the server re-checks the amount, term, existing debt and ATM
+  proximity before depositing anything.
+- **One loan, fixed terms.** A loan is disbursed straight to the bank with a term of 1–30
+  instalments and flat interest. Only one loan can be open at a time; a defaulted one blocks new
+  borrowing until it is repaid.
+- **The clock is wall-clock, not session time.** Each instalment has a UTC due timestamp. Online
+  accounts are settled every 30 seconds; an offline one is caught up the next time it loads, so
+  logging out never pauses a loan. Every payment is check-and-deduct in one synchronous step, so
+  an instalment can never overdraw the account.
+- **Defaulting has consequences, not an escape.** A failed payment lowers the score; three misses
+  default the loan, drop the score further and block new loans. The outstanding balance stays
+  until it is paid, so defaulting is never a way to clear the debt. Repaying in full closes the
+  loan and raises the score.
+- **Early repayment.** `/loan pay` takes any amount from the bank and reduces the balance
+  immediately; overpaying simply clears the remainder.
 - **Abuse protection.** Per-player rate limit, amount bounds, no self-transfer, and an
   audit line in the server console for every money movement.
 - **Exports** for other resources: `addMoney`, `removeMoney` (check-and-deduct in one step),

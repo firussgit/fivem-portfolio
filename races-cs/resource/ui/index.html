@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Time Trial</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section id="hud" class="hidden">
+    <div class="accent"></div>
+    <div class="inner">
+      <div class="top">
+        <span class="kicker">TIME TRIAL</span>
+        <span id="timer">0:00.000</span>
+      </div>
+      <h1 id="label">Race</h1>
+      <p id="objective" class="objective">&mdash;</p>
+      <div class="bar"><span id="progress"></span></div>
+      <div class="meta">
+        <span id="step">Checkpoint 1/1</span>
+        <span id="distance">&mdash;</span>
+      </div>
+      <div class="footnote"><span class="dot"></span><span id="hint">Reach the marked checkpoint</span></div>
+    </div>
+  </section>
+
+  <section id="summary" class="hidden">
+    <span id="summaryTitle">RACE OVER</span>
+    <strong id="summaryTime">0:00.000</strong>
+    <p id="summaryReason"></p>
+  </section>
+
+  <section id="board" class="hidden">
+    <div class="board-head">
+      <div>
+        <span class="kicker">LEADERBOARD</span>
+        <h1 id="boardRoute">Route</h1>
+      </div>
+      <span class="close" id="boardClose">&#10005;</span>
+    </div>
+    <ol id="boardList"></ol>
+    <p id="boardEmpty" class="empty hidden">No times set on this route yet.</p>
+    <p class="board-foot">Best time per driver. Run <code>/race &lt;id&gt;</code> to set yours.</p>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 A set of connected FiveM (GTA V) server resources written in **C#** (plus a little **Lua** and
 **JavaScript**): banking, garage, vehicle customisation, fuel, inventory, shops, jobs, field
-actions, needs, a phone, a dispatch radio and an admin tool. Each folder is a self-contained
+actions, needs, a phone, a dispatch radio, time-trial races and an admin tool. Each folder is a self-contained
 resource you can drop into `resources/`, and together they behave like a small roleplay server.
 
 The common thread is one rule: **the client is never trusted.** The UI and the game client only
@@ -30,6 +30,7 @@ and answers with the new truth.
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
 | [`dispatch-cs`](dispatch-cs) | C# + MySQL + NUI | Dispatch radio: 911/912 calls, on-duty police/EMS claims, server-validated scene positions |
+| [`races-cs`](races-cs) | C# + MySQL + NUI | Time trials: fixed routes, a provided car, server-owned clock and checkpoints, personal bests and a top-10 board |
 | [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
@@ -72,6 +73,9 @@ and answers with the new truth.
 - **Dispatch:** `phone-cs` creates 911/912 calls through dispatch-cs' server-only `createCall`
   export. Dispatch asks `jobs-cs` who is on duty, offers the call only to the matching
   department, and pays a resolved call through `bank-cs`.
+- **Races:** `races-cs` is deliberately standalone: routes, cars, limits and checkpoints live in
+  its server code, and the server owns the clock and the checkpoint polling, so it needs
+  `oxmysql` but no other portfolio resource.
 - Resources degrade gracefully: without `jobs-cs` there's just no mechanic discount; without
   `bank-cs` a purchase aborts before anything changes.
 
@@ -81,7 +85,8 @@ and answers with the new truth.
 |---|---|
 | **Server-authoritative state.** Balances, stock, fuel, inventories and vehicle state live on the server; the client renders what it's told. | every resource |
 | **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch |
-| **Anti-teleport checks.** A job stop or a dispatch "on scene" only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch |
+| **Anti-teleport checks.** A job stop, a dispatch "on scene" or a race checkpoint only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch, races |
+| **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races |
 | **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim |
 | **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
 | **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone |
@@ -222,6 +227,10 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/912 <message>` | dispatch-cs | Calls medical dispatch | `/912 Cyclist down on the beach` |
 | `/cancelcall` | dispatch-cs | Cancels your active call | `/cancelcall` |
 | `/dispatch` | dispatch-cs | Opens / closes the dispatch console (key **F2**) | `/dispatch` |
+| `/race` | races-cs | Lists the time-trial routes and their start points | `/race` |
+| `/race <route>` | races-cs | Starts a run at that route's start point; the car is provided | `/race downtown` |
+| `/race stop` | races-cs | Cancels your run and removes the race car | `/race stop` |
+| `/top <route>` | races-cs | Shows the route's top-10 board in-game and the first three in chat | `/top downtown` |
 | `/car [model]` | spawn-core | Dev helper: spawns a vehicle and seats you in it (requires `spawn.admin`) | `/car sultan` |
 | `/uifix` | bank-cs | Releases the mouse cursor if a UI ever leaves it stuck | `/uifix` |
 
@@ -286,11 +295,12 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 7. **A shift.** `/setjob <your id> courier 0` (or `taxi 0`), `/duty`, drive to the Go Postal / cab hub marked on the map and run `/work`. Follow the GPS stop to stop; the HUD shows the timer, distance and payout. Finish at the last stop to get paid in cash, then try `/work stats`.
 8. **Dispatch.** `/setjob <your id> police 0`, `/duty`, then press **F2** to open the dispatch console. Normally a civilian dials 911 or 912 from the phone's Emergency tab; for a solo test run `/dispatchtest police Robbery in progress` to place a call at your feet. Claim it, mark **En route**, mark **On scene**, then close it as **Resolved**: $150 is paid to your bank. `/dispatchtest medical ...` proves the medical queue is separate.
 9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`.
-10. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
-11. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
-12. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
-13. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-14. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+10. **A time trial.** Run `/race` for the route list, drive (or teleport with `/car`) to a start point, then `/race downtown`. A `comet2` is spawned and you are seated in it; the server starts the clock only after it has checked the real car model and that you are in it. Follow the gold marker and the GPS route through five checkpoints, then `/top downtown` to see the board. Repeat the route and try to beat your personal best.
+11. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
+12. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
+13. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
+14. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+15. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -461,6 +471,39 @@ Requires `oxmysql`, `jobs-cs`, OneSync and `bank-cs` for payouts. `phone-cs` is 
 calls still work through `/911` and `/912`. Convars: `dispatch_pay_per_call`, `dispatch_scene_radius`,
 `dispatch_call_ttl_minutes`, `dispatch_call_cooldown_seconds`.
 
+### races-cs
+
+Server-timed time trials with a persistent leaderboard, where the route, the car and the clock
+all live on the server.
+
+- **Routes are server data.** `downtown`, `coast` and `desert` (id, car, start point, time limit
+  and ordered checkpoints) are defined in `Server/RacesServer.cs`; the client receives only the
+  labels and coordinates it needs to draw blips and markers. Editing a route needs no client
+  change.
+- **The car is provided, and verified.** `/race <route>` requires the player to be on foot within
+  25 m of the start. The client spawns the named model next to them and reports the network id;
+  the server resolves the real entity, checks its model against the route and checks the player
+  is actually seated in it before starting the clock. A client that never reports a real car is
+  cancelled immediately (`races:spawnFailed`) or on a 20 s timeout.
+- **The clock and checkpoints are server-side.** A 200 ms loop reads the player's OneSync
+  position, checks the next checkpoint in order (25 m radius), and ends the run if the player
+  leaves the car, the car disappears, the player dies or the time limit expires. The HUD timer is
+  only a display; the stored time comes from the server's start and finish timestamps.
+- **Teleports don't win.** Each checkpoint is rejected when it was reached faster than a car
+  could cover the distance since the previous one (70 m/s cap, 2 s grace), and the run ends with
+  a "drive the route" message instead of a checkpoint credit.
+- **Append-only history.** Every finish is a row in `race_times` (licence, name, route,
+  milliseconds, car). Personal bests and the top-10 board are derived with
+  `MIN(milliseconds)` per licence and route, so improving a time adds a row rather than
+  rewriting history. The table is created on start; see `sql/install.sql`.
+- **NUI holds no authority.** The page renders the HUD, the result toast and the leaderboard it
+  is sent; it never knows or sends a time. `/top <route>` shows the board in-game and prints the
+  top three in chat; entries are written with `textContent`.
+- **Clean state.** Stopping, finishing, failing, disconnecting and resource stop all delete the
+  provided car. Starting again has a short cooldown so the car can't be farmed for a free spawn.
+
+Requires `oxmysql` and OneSync.
+
 ### needs-cs
 
 Hunger and thirst, built to react to other resources without depending on them.
@@ -618,8 +661,8 @@ Developed and tested against a local FiveM server (artifact 35245). C# resources
 `dotnet build` through its `deploy.ps1`. The `*-dev` ACEs in a local `server.cfg` are for testing
 only; on a real server, grant them to staff groups as shown in the quick start.
 
-The server-side helpers used by `jobs-cs` and `dispatch-cs` live in [`shared/Server/PortfolioScript.cs`](shared/Server/PortfolioScript.cs)
-and are linked into the resource at compile time, so adopting them needs no extra assembly or
+The server-side helpers used by the `*-cs` resources live in [`shared/Server/PortfolioScript.cs`](shared/Server/PortfolioScript.cs)
+and are linked into each resource at compile time, so adopting them needs no extra assembly or
 runtime dependency. A GitHub Actions workflow builds every resource with `setup.ps1` on each push.
 
 ## License

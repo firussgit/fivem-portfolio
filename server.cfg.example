@@ -59,6 +59,7 @@ ensure customs-cs
 ensure fuel-cs
 ensure phone-cs
 ensure dispatch-cs
+ensure races-cs
 ensure spawn-core
 ensure admin-cs
 

@@ -1,5 +1,10 @@
 # FiveM Portfolio
 
+![C#](https://img.shields.io/badge/C%23-.NET%208-512BD4)
+![FiveM](https://img.shields.io/badge/FiveM-server-blue)
+![MySQL](https://img.shields.io/badge/MySQL-MariaDB-003545)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 A set of connected FiveM (GTA V) server resources written in **C#** (plus a little **Lua** and
 **JavaScript**): banking, garage, vehicle customisation, fuel, inventory, shops, jobs, field
 actions, needs, a phone, a dispatch radio, time-trial races and an admin tool. Each folder is a self-contained
@@ -11,6 +16,7 @@ and answers with the new truth.
 
 ## Contents
 
+- [Verified in-game](#verified-in-game)
 - [Resources](#resources)
 - [How the resources fit together](#how-the-resources-fit-together)
 - [Design principles](#design-principles)
@@ -19,6 +25,21 @@ and answers with the new truth.
 - [Try it: a five-minute tour](#try-it-a-five-minute-tour)
 - [Resource details](#resource-details)
 - [Notes](#notes)
+
+## Verified in-game
+
+Every flow below was exercised end to end on a local FXServer with a real GTA V client, not just
+unit-tested:
+
+- **Bank:** ATM deposits and withdrawals, transfers, loans and credit, restart persistence.
+- **Garage:** buy, park and takeout, keys, hotwire theft and recovery, insurance claim.
+- **Dealer:** sell and buy, timed rental with deposit refund, test drives, showroom floor handling.
+- **Dispatch:** police and EMS calls, claim / en route / on scene / resolve, 911 and cancel.
+- **Jobs:** courier and taxi runs, duty, paychecks, police and EMS field actions.
+- **Inventory, shops and needs:** purchases, eating and drinking, persistence.
+- **Phone:** contacts, bank tab, 911/912, 7-digit numbers.
+- **Races:** checkpoints, personal best vs a slower run, leaderboard, cancel and unknown route.
+- **Reconnect:** balances, vehicles, loans, keys and saved position survive a restart.
 
 ## Resources
 

@@ -39,9 +39,9 @@ set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call 
 set dispatch_scene_radius 40          # metres: how close a unit must be to mark on scene / resolve
 set dispatch_call_ttl_minutes 15      # calls left open this long expire
 set dispatch_call_cooldown_seconds 20 # minimum gap between a player's 911 calls
-set dealer_showroom_x -45.0           # dealership showroom position (dealer-cs)
-set dealer_showroom_y -1098.0
-set dealer_showroom_z 26.4
+set dealer_showroom_x -56.8          # dealership marker on the PDM forecourt (dealer-cs)
+set dealer_showroom_y -1109.9        # keep it outside: the vanilla showroom floor is not
+set dealer_showroom_z 25.44          # streamed on every client, so standing inside drops you
 set dealer_range 8                    # metres: how close a player must be to buy / sell / test drive
 set dealer_testdrive_seconds 90       # test drive limit
 set dealer_sell_min_percent 35        # trade-in offer for a wrecked car

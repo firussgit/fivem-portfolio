@@ -25,6 +25,8 @@ namespace Garage.Client
             EventHandlers["garage:applyLock"] += new Action<int, bool>(OnApplyLock);
             EventHandlers["garage:applyEngine"] += new Action<int, bool>(OnApplyEngine);
             EventHandlers["garage:locate"] += new Action<string>(OnLocate);
+            EventHandlers["garage:hotwired"] += new Action<int, string>(OnHotwired);
+            EventHandlers["garage:theftCar"] += new Action<string, string>(OnTheftCar);
 
             RegisterCommand("park", new Action<int, List<object>, string>((s, a, r) => Park()), false);
 
@@ -81,8 +83,30 @@ namespace Garage.Client
                 (int)GetVehicleBodyHealth(veh));
         }
 
-        // ---------- lock ----------
+        // Dev helper: spawn a locked car a few metres away, without seating the player.
+        async void OnTheftCar(string model, string plate)
+        {
+            uint hash = (uint)GetHashKey(model);
+            if (!IsModelInCdimage(hash) || !IsModelAVehicle(hash)) return;
 
+            RequestModel(hash);
+            for (int i = 0; i < 100 && !HasModelLoaded(hash); i++) await Delay(50);
+            if (!HasModelLoaded(hash)) return;
+
+            int ped = PlayerPedId();
+            var pos = GetOffsetFromEntityInWorldCoords(ped, 0.0f, 7.0f, 0.5f);
+            int veh = CreateVehicle(hash, pos.X, pos.Y, pos.Z, GetEntityHeading(ped), true, false);
+            SetVehicleNumberPlateText(veh, plate);
+            SetVehicleDoorsLocked(veh, 2);
+            SetVehicleDoorsLockedForAllPlayers(veh, true);
+            SetEntityAsMissionEntity(veh, true, true);
+            SetModelAsNoLongerNeeded(hash);
+
+            await Delay(1000);
+            if (DoesEntityExist(veh)) TriggerServerEvent("garage:theftSpawned", NetworkGetNetworkIdFromEntity(veh), plate);
+        }
+
+        // ---------- lock ----------
         void ToggleLock()
         {
             int veh = CurrentOrNearbyVehicle();
@@ -118,6 +142,24 @@ namespace Garage.Client
             NetworkRequestControlOfEntity(veh);
             if (on) _engineOff.Remove(veh); else _engineOff.Add(veh);
             SetVehicleEngineOn(veh, on, false, true);
+        }
+
+        // The server already validated and recorded the theft; this only makes the car drivable.
+        async void OnHotwired(int netId, string plate)
+        {
+            int veh = NetworkGetEntityFromNetworkId(netId);
+            if (veh == 0 || !DoesEntityExist(veh)) return;
+
+            NetworkRequestControlOfEntity(veh);
+            await Delay(150);
+            if (!DoesEntityExist(veh)) return;
+
+            _engineOff.Remove(veh);
+            SetVehicleDoorsLocked(veh, 1);
+            SetVehicleDoorsLockedForAllPlayers(veh, false);
+            SetVehicleUndriveable(veh, false);
+            SetVehicleEngineOn(veh, true, true, true);
+            Notify($"Hotwired [{plate}]. Move before the owner sees you.");
         }
 
         // The game restarts the engine whenever someone gets in, so keep it off while the server wants it off.

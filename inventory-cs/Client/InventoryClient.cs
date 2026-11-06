@@ -106,7 +106,13 @@ namespace Inventory.Client
                     else Notify("No vehicle nearby to repair.");
                     break;
                 case "lockpick":
-                    Notify("You fiddle with your lockpick...");
+                    // The lockpick works on an owned car belonging to someone else. The client only
+                    // says which vehicle; garage-cs validates ownership, distance and the timer.
+                    var carPos = GetEntityCoords(ped, true);
+                    int target = GetClosestVehicle(carPos.X, carPos.Y, carPos.Z, 5.0f, 0, 70);
+                    if (target == 0) { Notify("No vehicle nearby to hotwire."); break; }
+                    TriggerServerEvent("garage:hotwire", NetworkGetNetworkIdFromEntity(target));
+                    Notify("You work the lock...");
                     break;
             }
         }

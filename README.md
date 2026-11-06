@@ -25,7 +25,7 @@ and answers with the new truth.
 | Resource | Language | What it shows |
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
-| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate |
+| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft state |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
@@ -197,6 +197,7 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/lock` | garage-cs | Locks / unlocks your nearest vehicle (key **L**) | `/lock` |
 | `/engine` | garage-cs | Engine on / off for the vehicle you're in (key **K**) | `/engine` |
 | `/locate` | garage-cs | Blips and a GPS route to your vehicles that are out | `/locate` |
+| *Use* `lockpick` | inventory-cs + garage-cs | Hotwire a registered car that belongs to someone else (8 s, consumes the lockpick) | Use a lockpick from the inventory next to the car |
 | `/jobs` | jobs-cs | Lists available jobs | `/jobs` |
 | `/job` | jobs-cs | Shows your job, grade, salary and duty state | `/job` |
 | `/duty` | jobs-cs | Toggles duty (you only get paychecks on duty) | `/duty` |
@@ -239,6 +240,7 @@ Roles rank `none < mod < admin < superadmin`. You can only act on someone rankin
 | Command | Permission | What it does | Example |
 |---|---|---|---|
 | `/givecar <model>` | `garage.admin` | Adds a vehicle to your garage. Models: adder, sultan, buffalo, comet2, kuruma, faggio, bati, sandking, stanier, baller | `/givecar comet2` |
+| `/theftcar <model>` | `garage.admin` | Spawns a locked car owned by `test:theft`, so you can test hotwiring solo | `/theftcar sultan` |
 | `/giveitem <id> <item> [count]` | `inventory.admin` | Gives an item. Items: water, sandwich, bandage, lockpick, repair_kit, radio | `/giveitem 1 sandwich 3` |
 | `/setjob <id> <job> [grade]` | `jobs.admin` | Sets a job. Jobs: unemployed, courier, police, ems, mechanic, taxi | `/setjob 1 mechanic 1` |
 | `/setworkhub <courier\|taxi>` | `jobs.admin` | Moves a job activity start point (hub) to where you stand | `/setworkhub courier` |
@@ -277,9 +279,10 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 7. **A shift.** `/setjob <your id> courier 0` (or `taxi 0`), `/duty`, drive to the Go Postal / cab hub marked on the map and run `/work`. Follow the GPS stop to stop; the HUD shows the timer, distance and payout. Finish at the last stop to get paid in cash, then try `/work stats`.
 8. **Dispatch.** `/setjob <your id> police 0`, `/duty`, then press **F2** to open the dispatch console. Normally a civilian dials 911 or 912 from the phone's Emergency tab; for a solo test run `/dispatchtest police Robbery in progress` to place a call at your feet. Claim it, mark **En route**, mark **On scene**, then close it as **Resolved**: $150 is paid to your bank. `/dispatchtest medical ...` proves the medical queue is separate.
 9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`.
-10. **Items.** Place a shop with `/setshop general`, buy water and a sandwich, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
-11. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-12. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+10. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
+11. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
+12. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+13. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -319,14 +322,21 @@ A persistent vehicle garage. The database is the source of truth and the client 
 claim a car it doesn't own.
 
 - **MySQL via oxmysql.** `player_vehicles` (owner license, model, unique plate, stored/out
-  state, engine and body health, plus `mods` and `fuel` columns used by customs and fuel). The
-  table is created on start; see `sql/install.sql`.
+  state, a `stolen` flag, engine and body health, plus `mods` and `fuel` columns used by customs
+  and fuel). The table is created on start; see `sql/install.sql`.
 - **Atomic take-out.** `UPDATE ... WHERE id = ? AND owner = ? AND state = 1` checks ownership
   *and* that the car is stored in one statement, so two simultaneous requests can never both
   spawn the same vehicle.
 - **Server-verified parking (OneSync).** `/park` sends only a network id and the condition.
   The server resolves the real entity, reads its plate, checks that this player took that
-  plate out, and only then stores and deletes it.
+  plate out, and only then stores and deletes it. A stolen car can't be parked away.
+- **Hotwire theft.** Using a `lockpick` (`inventory-cs`) next to someone else's car sends only
+  the vehicle's network id. The server resolves the real entity, checks the plate is registered,
+  out, owned by someone else and unoccupied, consumes the lockpick, then runs the
+  `garage_hotwire_seconds` timer itself before setting `stolen = 1`. The client can't skip the
+  wait or claim a car it isn't standing next to. The owner is told in chat to call 911; police
+  `/impound` (jobs-cs) recovers the car, which clears the flag and returns it to the garage.
+  `/garage` shows `STOLEN (call the police)` while it is out.
 - **Whitelisted models, capped garage size (10), rate limiting, clamped inputs.**
 - **Vehicle controls.** `L` locks/unlocks, `K` toggles the engine, `/locate` shows where your
   vehicles are (blips plus a GPS waypoint to the nearest). The client sends only *which* vehicle;
@@ -338,7 +348,8 @@ claim a car it doesn't own.
 - **Clean state.** Cars of a player who disconnects, and every car after a server restart,
   go back to the garage instead of staying marked "out".
 
-Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync.
+Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync. `inventory-cs` is optional:
+without it the garage still works, but lockpicks can't start a hotwire.
 
 ### customs-cs
 
@@ -531,7 +542,9 @@ Jobs with grades, a duty toggle, automatic paychecks, repeatable activities and 
   resurrects them and the server re-checks the result. Mechanics `/repair` consume a
   `repair_kit` through inventory-cs and pay through bank-cs. Every action re-checks job, duty
   and the server-side distance; `/impound` and `/repair` resolve the client's network id back
-  to the real vehicle before doing anything. Each action is appended to `job_actions`.
+  to the real vehicle before doing anything. Impounding a car flagged `stolen` by the garage
+  clears that flag, returns it to the owner's garage and tells both players it was recovered.
+  Each action is appended to `job_actions`.
 - **Hubs placed in-game.** `/setworkhub <courier|taxi>` moves a start point to where an admin is
   standing and saves it to `workhubs.txt`, so no coordinates have to be typed by hand.
 - **History, not live state.** Active runs live in memory because they belong to a session; every

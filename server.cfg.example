@@ -22,6 +22,7 @@ set ems_revive_pay 200                # bank bonus for an EMS revive (0 = none)
 set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can be revived again
 set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
 set police_fine_max 2500              # largest fine a police officer can issue
+set garage_hotwire_seconds 8          # how long a lockpick takes to hotwire a stolen car
 set needs_tick_seconds 60             # hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # shop restock (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)

@@ -328,7 +328,7 @@ namespace Jobs.Server
                 string plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
                 if (plate.Length == 0) { Say(p, "That vehicle has no plate."); return; }
 
-                Query("SELECT owner, model, state FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
+                Query("SELECT owner, model, state, stolen FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
                 {
                     if (rows.Count == 0) { Say(p, "That vehicle is not registered (only owned vehicles can be impounded)."); return; }
 
@@ -337,9 +337,11 @@ namespace Jobs.Server
 
                     string ownerLicense = row["owner"].ToString();
                     string model = row["model"].ToString();
+                    bool stolen = Convert.ToInt32(row["stolen"]) == 1;
 
-                    // Same atomic move the garage uses: only one impound can win.
-                    Db("UPDATE player_vehicles SET state = 1 WHERE plate = ? AND state = 0", new object[] { plate }, affected =>
+                    // Same atomic move the garage uses: only one impound can win. Recovering a
+                    // stolen car also clears the theft flag, so the owner can use it again.
+                    Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE plate = ? AND state = 0", new object[] { plate }, affected =>
                     {
                         if (affected != 1) { Say(p, "That vehicle just changed state; try again."); return; }
 
@@ -350,14 +352,19 @@ namespace Jobs.Server
                         // Failsafe: the officer's client also removes the entity if it still exists.
                         TriggerClientEvent(p, "jobs:impoundOk", netId);
 
-                        Say(p, $"Impounded {model} [{plate}].");
+                        Say(p, stolen
+                            ? $"Recovered stolen {model} [{plate}]. It is back in the owner's garage."
+                            : $"Impounded {model} [{plate}].");
                         var ownerPlayer = FindByLicense(ownerLicense);
                         if (ownerPlayer != null)
-                            Say(ownerPlayer, $"Your {model} [{plate}] was impounded by {p.Name}. Use /takeout to get it back.");
+                            Say(ownerPlayer, stolen
+                                ? $"Your {model} [{plate}] was recovered by {p.Name}. Use /takeout to get it back."
+                                : $"Your {model} [{plate}] was impounded by {p.Name}. Use /takeout to get it back.");
 
                         LogAction("impound", p, ownerLicense,
-                            ownerPlayer != null ? CleanText(ownerPlayer.Name, 60) : "", 0, $"{model} [{plate}]");
-                        Debug.WriteLine($"[jobs] {p.Name} impounded [{plate}] ({model})");
+                            ownerPlayer != null ? CleanText(ownerPlayer.Name, 60) : "", 0,
+                            stolen ? $"recovered stolen {model} [{plate}]" : $"{model} [{plate}]");
+                        Debug.WriteLine($"[jobs] {p.Name} impounded [{plate}] ({model}, stolen={stolen})");
                     });
                 });
             });

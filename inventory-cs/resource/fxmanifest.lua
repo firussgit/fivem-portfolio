@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Slot/weight inventory in C#: server-authoritative, MySQL-backed, drag and drop NUI'
-version '0.1.0'
+description 'Slot/weight inventory in C#: server-authoritative, MySQL-backed, drag and drop NUI; lockpick drives garage hotwiring'
+version '0.2.0'
 
 dependency 'oxmysql'
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using CitizenFX.Core;
 using static CitizenFX.Core.Native.API;
 
@@ -21,10 +22,17 @@ namespace Garage.Server
         const int MaxVehicles = 10;
         const long CooldownMs = 700;
         const string PlateChars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
+        const string TestOwner = "test:theft";
+        const float HotwireRange = 5.0f;
 
         readonly Random _rng = new Random();
         readonly Dictionary<string, HashSet<string>> _out = new Dictionary<string, HashSet<string>>(); // license -> plates in the world
         readonly Dictionary<int, long> _lastUse = new Dictionary<int, long>();
+
+        // Licenses with a hotwire attempt in progress. The attempt is timed on the server; the
+        // client just waits and watches, so a modified client cannot skip the wait.
+        readonly HashSet<string> _hotwires = new HashSet<string>();
+        int _hotwireSeconds;
 
         // Live state of vehicles that are out in the world, keyed by plate. The server is the source of truth;
         // clients are told what to apply. All of it is cleared when a vehicle is parked or its owner leaves.
@@ -33,16 +41,20 @@ namespace Garage.Server
         readonly HashSet<string> _engineOff = new HashSet<string>();
         const float InteractRange = 15f;
 
+        // A player can only work one lock at a time.
         public GarageServer()
         {
             Cmd("locate", Locate);
             Cmd("givecar", GiveCar);
             Cmd("garage", ListGarage);
             Cmd("takeout", TakeOut);
+            Cmd("theftcar", TheftCar);
 
             // Server-only: jobs-cs validates and records a police impound, then asks the garage to
             // remove the live entity and its cache so the vehicle can be taken out again later.
             Exports.Add("impound", new Func<string, bool>(Impound));
+
+            _hotwireSeconds = Math.Max(2, Math.Min(60, GetConvarInt("garage_hotwire_seconds", 8)));
 
             try
             {
@@ -55,9 +67,11 @@ namespace Garage.Server
                        // "mods" is opaque extension data written by other resources (e.g. customs-cs);
                        // the garage only stores it and passes it on when the vehicle spawns.
                        Db("ALTER TABLE player_vehicles ADD COLUMN IF NOT EXISTS mods VARCHAR(512) NULL", new object[0], __ =>
-                           // After a restart nobody's cars are in the world any more: return them all to the garage.
-                           Db("UPDATE player_vehicles SET state = 1 WHERE state = 0", new object[0],
-                              n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage"))));
+                           // A stolen car is still out in the world until the police recover it.
+                           Db("ALTER TABLE player_vehicles ADD COLUMN IF NOT EXISTS stolen TINYINT NOT NULL DEFAULT 0", new object[0], ___ =>
+                               // After a restart nobody's cars are in the world any more: return them all to the garage.
+                               Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE state = 0", new object[0],
+                                  n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage")))));
             }
             catch (Exception e)
             {
@@ -126,14 +140,16 @@ namespace Garage.Server
             string license = License(p);
             if (license == null) return;
 
-            Query("SELECT id, model, plate, state FROM player_vehicles WHERE owner = ? ORDER BY id", new object[] { license }, rows =>
+            Query("SELECT id, model, plate, state, stolen FROM player_vehicles WHERE owner = ? ORDER BY id", new object[] { license }, rows =>
             {
                 if (rows.Count == 0) { Say(p, "Your garage is empty."); return; }
                 Say(p, "Your vehicles (use /takeout <id>):");
                 foreach (var r in rows)
                 {
                     bool stored = Convert.ToInt32(r["state"]) == 1;
-                    Say(p, $"#{r["id"]}  {r["model"]}  [{r["plate"]}]  {(stored ? "in garage" : "OUT")}");
+                    bool stolen = Convert.ToInt32(r["stolen"]) == 1;
+                    string state = stored ? "in garage" : (stolen ? "STOLEN (call the police)" : "OUT");
+                    Say(p, $"#{r["id"]}  {r["model"]}  [{r["plate"]}]  {state}");
                 }
             });
         }
@@ -166,6 +182,30 @@ namespace Garage.Server
             });
         }
 
+        // Dev helper: a car registered to a fake owner, spawned next to you. It is a normal
+        // player_vehicles row, so a hotwire and a police /impound behave exactly like real theft.
+        void TheftCar(Player p, List<object> args)
+        {
+            if (!IsPlayerAceAllowed(p.Handle, "garage.admin")) { Say(p, "You are not allowed to use that."); return; }
+
+            string model = args.Count > 0 ? args[0]?.ToString().ToLowerInvariant() : null;
+            if (model == null || !AllowedModels.Contains(model))
+            {
+                Say(p, "Usage: /theftcar <" + string.Join("|", AllowedModels.OrderBy(m => m)) + ">");
+                return;
+            }
+
+            string plate = NewPlate();
+            Insert("INSERT INTO player_vehicles (owner, model, plate, state) VALUES (?, ?, ?, 0)",
+                new object[] { TestOwner, model, plate }, id =>
+                {
+                    if (id == 0) { Say(p, "Could not create the test vehicle."); return; }
+                    TriggerClientEvent(p, "garage:theftCar", model, plate);
+                    Say(p, $"Spawned {model} [{plate}] owned by '{TestOwner}'. Use a lockpick next to it.");
+                    Debug.WriteLine($"[garage] dev theft car [{plate}] ({model}) spawned for {p.Name}");
+                });
+        }
+
         // ---------- events from the client ----------
 
         // The client reports the network id of the vehicle it just spawned. We only accept it if the real
@@ -181,6 +221,23 @@ namespace Garage.Server
             if ((GetVehicleNumberPlateText(entity) ?? "").Trim() != plate) return;
 
             _netIds[plate] = netId;
+        }
+
+        // The dev theft car is spawned by the client too; track it so /impound can delete it
+        // server-side. Only accepts a plate that really belongs to the test owner.
+        [EventHandler("garage:theftSpawned")]
+        void OnTheftSpawned([FromSource] Player p, int netId, string plate)
+        {
+            if (p == null || !IsPlayerAceAllowed(p.Handle, "garage.admin") || string.IsNullOrEmpty(plate)) return;
+
+            int entity = NetworkGetEntityFromNetworkId(netId);
+            if (entity == 0 || !DoesEntityExist(entity)) return;
+            if ((GetVehicleNumberPlateText(entity) ?? "").Trim() != plate) return;
+
+            Query("SELECT owner FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
+            {
+                if (rows.Count == 1 && rows[0]["owner"].ToString() == TestOwner) _netIds[plate] = netId;
+            });
         }
 
         [EventHandler("garage:lock")]
@@ -219,6 +276,125 @@ namespace Garage.Server
 
             TriggerClientEvent(p, "garage:applyEngine", netId, nowOn);
             Say(p, $"[{plate}] engine {(nowOn ? "on" : "off")}.");
+        }
+
+        // ---------- theft ----------
+
+        // Using a lockpick reports the nearest vehicle. The server checks that it is a registered
+        // car owned by someone else, that nobody is inside, and that the player is really next to
+        // it; it then consumes the lockpick and runs the timed attempt itself.
+        [EventHandler("garage:hotwire")]
+        void OnHotwire([FromSource] Player p, int netId)
+        {
+            if (p == null || RateLimited(int.Parse(p.Handle))) return;
+            string license = License(p);
+            if (license == null) return;
+
+            if (_hotwires.Contains(license)) { Say(p, "You are already working on a lock."); return; }
+
+            int entity = NetworkGetEntityFromNetworkId(netId);
+            if (entity == 0 || !DoesEntityExist(entity)) { Say(p, "No vehicle found."); return; }
+
+            int ped = GetPlayerPed(p.Handle);
+            if (ped == 0) return;
+            if (GetVehiclePedIsIn(ped, false) != 0) { Say(p, "Get out of the vehicle first."); return; }
+            if (Vector3.Distance(GetEntityCoords(ped), GetEntityCoords(entity)) > HotwireRange)
+            {
+                Say(p, "Get closer to the vehicle.");
+                return;
+            }
+
+            string plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
+            if (plate.Length == 0) { Say(p, "That vehicle has no plate."); return; }
+
+            Query("SELECT owner, model, state, stolen FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
+            {
+                if (rows.Count == 0) { Say(p, "That vehicle is not registered."); return; }
+
+                var row = rows[0];
+                string owner = row["owner"].ToString();
+                string model = row["model"].ToString();
+
+                if (Convert.ToInt32(row["state"]) == 1) { Say(p, "That vehicle is stored in a garage."); return; }
+                if (owner == license) { Say(p, "That is your own vehicle."); return; }
+                if (Convert.ToInt32(row["stolen"]) == 1) { Say(p, "That vehicle is already reported stolen."); return; }
+
+                foreach (var other in Players.ToList())
+                {
+                    if (other == null) continue;
+                    int otherPed = GetPlayerPed(other.Handle);
+                    if (otherPed != 0 && GetVehiclePedIsIn(otherPed, false) == entity)
+                    {
+                        Say(p, "Someone is inside the vehicle.");
+                        return;
+                    }
+                }
+
+                bool hasKit = false;
+                try { hasKit = (bool)Exports["inventory-cs"].hasItem(int.Parse(p.Handle), "lockpick", 1); }
+                catch (Exception e) { Debug.WriteLine("[garage] inventory-cs unavailable: " + e.Message); }
+                if (!hasKit) { Say(p, "You need a lockpick. Buy one at a shop."); return; }
+
+                bool removed = false;
+                try { removed = (bool)Exports["inventory-cs"].removeItem(int.Parse(p.Handle), "lockpick", 1); }
+                catch (Exception e) { Debug.WriteLine("[garage] inventory-cs unavailable: " + e.Message); }
+                if (!removed) { Say(p, "The lockpick could not be used."); return; }
+
+                _hotwires.Add(license);
+                Say(p, $"You start working the lock on the {model} [{plate}]...");
+                _ = FinishHotwire(int.Parse(p.Handle), license, entity, plate, model, owner);
+            });
+        }
+
+        async Task FinishHotwire(int src, string license, int entity, string plate, string model, string ownerLicense)
+        {
+            try
+            {
+                await Delay(_hotwireSeconds * 1000);
+                _hotwires.Remove(license);
+
+                var p = Players[src];
+                if (p == null) return;
+
+                int ped = GetPlayerPed(p.Handle);
+                if (ped == 0 || !DoesEntityExist(entity)
+                    || Vector3.Distance(GetEntityCoords(ped), GetEntityCoords(entity)) > HotwireRange)
+                {
+                    Say(p, "You moved away; the hotwire failed and the lockpick is spent.");
+                    return;
+                }
+
+                // Only the first successful attempt wins, and a car can only be reported stolen once.
+                Db("UPDATE player_vehicles SET stolen = 1 WHERE plate = ? AND stolen = 0 AND state = 0", new object[] { plate }, affected =>
+                {
+                    if (affected != 1) { Say(p, "The immobiliser refuses; try another vehicle."); return; }
+
+                    _locked.Remove(plate);
+                    _engineOff.Remove(plate);
+
+                    TriggerClientEvent(p, "garage:hotwired", NetworkGetNetworkIdFromEntity(entity), plate);
+                    Say(p, $"You hotwired the {model} [{plate}]. Drive it somewhere safe.");
+
+                    var owner = FindByLicense(ownerLicense);
+                    if (owner != null)
+                        Say(owner, $"Your {model} [{plate}] was just stolen! Call 911.");
+
+                    Debug.WriteLine($"[garage] {p.Name} hotwired [{plate}] ({model})");
+                });
+            }
+            catch (Exception e)
+            {
+                _hotwires.Remove(license);
+                Debug.WriteLine("[garage] hotwire error: " + e.Message);
+            }
+        }
+
+        Player FindByLicense(string license)
+        {
+            if (string.IsNullOrEmpty(license)) return null;
+            foreach (var p in Players.ToList())
+                if (p != null && License(p) == license) return p;
+            return null;
         }
 
         // Resolves a client-supplied network id to a real vehicle entity owned (taken out) by this player.
@@ -302,10 +478,14 @@ namespace Garage.Server
             if (!Track(license).Contains(plate)) { Say(p, "That is not one of your vehicles."); return; }
 
             engine = Clamp(engine); body = Clamp(body);
-            Db("UPDATE player_vehicles SET state = 1, engine = ?, body = ? WHERE plate = ? AND owner = ? AND state = 0",
+            Db("UPDATE player_vehicles SET state = 1, engine = ?, body = ? WHERE plate = ? AND owner = ? AND state = 0 AND stolen = 0",
                new object[] { engine, body, plate, license }, affected =>
                {
-                   if (affected != 1) { Say(p, "Could not store that vehicle."); return; }
+                   if (affected != 1)
+                   {
+                       Say(p, "Could not store that vehicle (a stolen vehicle has to be recovered by the police).");
+                       return;
+                   }
                    Track(license).Remove(plate);
                    ForgetVehicle(plate);
                    if (DoesEntityExist(entity)) DeleteEntity(entity);
@@ -321,6 +501,7 @@ namespace Garage.Server
             string license = License(p);
             if (license == null) return;
             _lastUse.Remove(int.Parse(p.Handle));
+            _hotwires.Remove(license);
 
             // A player who leaves with cars out must not leave them marked "out" forever.
             if (_out.TryGetValue(license, out var plates))
@@ -328,7 +509,7 @@ namespace Garage.Server
                 foreach (var plate in plates)
                 {
                     ForgetVehicle(plate);
-                    Db("UPDATE player_vehicles SET state = 1 WHERE plate = ? AND owner = ?", new object[] { plate, license }, _ => { });
+                    Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE plate = ? AND owner = ?", new object[] { plate, license }, _ => { });
                 }
                 _out.Remove(license);
             }

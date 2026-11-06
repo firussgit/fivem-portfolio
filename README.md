@@ -25,7 +25,7 @@ and answers with the new truth.
 | Resource | Language | What it shows |
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
-| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft state |
+| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
@@ -145,6 +145,11 @@ set ems_revive_pay 200                # bank bonus for an EMS revive (0 = none)
 set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can be revived again
 set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
 set police_fine_max 2500              # largest fine a police officer can issue
+set garage_hotwire_seconds 8          # how long a lockpick takes to hotwire a stolen car
+set insurance_payout_percent 50       # share of the repair cost paid on an insurance claim
+set insurance_payout_max 2500         # hard cap on one claim settlement
+set insurance_deductible 250          # taken off each claim settlement
+set insurance_claim_cooldown_minutes 30 # minimum gap between claims on the same vehicle
 set needs_tick_seconds 60             # how often hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # how often shop stock refills (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)
@@ -198,6 +203,8 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/engine` | garage-cs | Engine on / off for the vehicle you're in (key **K**) | `/engine` |
 | `/locate` | garage-cs | Blips and a GPS route to your vehicles that are out | `/locate` |
 | *Use* `lockpick` | inventory-cs + garage-cs | Hotwire a registered car that belongs to someone else (8 s, consumes the lockpick) | Use a lockpick from the inventory next to the car |
+| `/insurance` | garage-cs | Lists your stored cars with the estimated insurance payout | `/insurance` |
+| `/claim <vehicle id>` | garage-cs | Repairs a stored, damaged car and pays the settlement to your bank | `/claim 4` |
 | `/jobs` | jobs-cs | Lists available jobs | `/jobs` |
 | `/job` | jobs-cs | Shows your job, grade, salary and duty state | `/job` |
 | `/duty` | jobs-cs | Toggles duty (you only get paychecks on duty) | `/duty` |
@@ -281,8 +288,9 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`.
 10. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
 11. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
-12. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-13. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+12. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
+13. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+14. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -337,6 +345,12 @@ claim a car it doesn't own.
   wait or claim a car it isn't standing next to. The owner is told in chat to call 911; police
   `/impound` (jobs-cs) recovers the car, which clears the flag and returns it to the garage.
   `/garage` shows `STOLEN (call the police)` while it is out.
+- **Insurance claims.** `/insurance` quotes a settlement for each stored car from the damage saved
+  on its row; `/claim <id>` repairs it and pays the settlement to the player's bank. The quote is
+  `2 × lost health points × insurance_payout_percent` minus `insurance_deductible`, capped by
+  `insurance_payout_max`, with a per-vehicle `insurance_claim_cooldown_minutes` cooldown. Stored,
+  non-stolen cars only; the update matches the exact damage the quote used and each claim is
+  appended to `insurance_claims` with a `paid` flag.
 - **Whitelisted models, capped garage size (10), rate limiting, clamped inputs.**
 - **Vehicle controls.** `L` locks/unlocks, `K` toggles the engine, `/locate` shows where your
   vehicles are (blips plus a GPS waypoint to the nearest). The client sends only *which* vehicle;

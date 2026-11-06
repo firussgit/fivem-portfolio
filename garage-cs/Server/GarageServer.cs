@@ -34,6 +34,14 @@ namespace Garage.Server
         readonly HashSet<string> _hotwires = new HashSet<string>();
         int _hotwireSeconds;
 
+        // Insurance: the insurer repairs a stored vehicle and pays a settlement based on the
+        // damage recorded when it was parked. Values are bounded convars; all maths is here.
+        int _insurancePercent;
+        int _insuranceMax;
+        int _insuranceDeductible;
+        long _insuranceCooldownSeconds;
+        const int MinClaim = 25;
+
         // Live state of vehicles that are out in the world, keyed by plate. The server is the source of truth;
         // clients are told what to apply. All of it is cleared when a vehicle is parked or its owner leaves.
         readonly Dictionary<string, int> _netIds = new Dictionary<string, int>(); // plate -> network id
@@ -49,12 +57,18 @@ namespace Garage.Server
             Cmd("garage", ListGarage);
             Cmd("takeout", TakeOut);
             Cmd("theftcar", TheftCar);
+            Cmd("insurance", ListInsurance);
+            Cmd("claim", Claim);
 
             // Server-only: jobs-cs validates and records a police impound, then asks the garage to
             // remove the live entity and its cache so the vehicle can be taken out again later.
             Exports.Add("impound", new Func<string, bool>(Impound));
 
             _hotwireSeconds = Math.Max(2, Math.Min(60, GetConvarInt("garage_hotwire_seconds", 8)));
+            _insurancePercent = Math.Max(0, Math.Min(100, GetConvarInt("insurance_payout_percent", 50)));
+            _insuranceMax = Math.Max(0, Math.Min(100000, GetConvarInt("insurance_payout_max", 2500)));
+            _insuranceDeductible = Math.Max(0, Math.Min(10000, GetConvarInt("insurance_deductible", 250)));
+            _insuranceCooldownSeconds = Math.Max(0, Math.Min(10080, GetConvarInt("insurance_claim_cooldown_minutes", 30))) * 60L;
 
             try
             {
@@ -72,6 +86,20 @@ namespace Garage.Server
                                // After a restart nobody's cars are in the world any more: return them all to the garage.
                                Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE state = 0", new object[0],
                                   n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage")))));
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("[garage] database unavailable (is oxmysql started?): " + e.Message);
+            }
+
+            try
+            {
+                Db("CREATE TABLE IF NOT EXISTS insurance_claims (" +
+                   "id INT AUTO_INCREMENT PRIMARY KEY, license VARCHAR(64) NOT NULL, plate VARCHAR(8) NOT NULL, " +
+                   "model VARCHAR(32) NOT NULL, amount INT NOT NULL, paid TINYINT NOT NULL DEFAULT 0, " +
+                   "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                   "INDEX idx_plate (plate), INDEX idx_license (license))", new object[0],
+                   _ => Debug.WriteLine("[garage] insurance ready"));
             }
             catch (Exception e)
             {
@@ -203,6 +231,132 @@ namespace Garage.Server
                     TriggerClientEvent(p, "garage:theftCar", model, plate);
                     Say(p, $"Spawned {model} [{plate}] owned by '{TestOwner}'. Use a lockpick next to it.");
                     Debug.WriteLine($"[garage] dev theft car [{plate}] ({model}) spawned for {p.Name}");
+                });
+        }
+
+        // ---------- insurance ----------
+
+        // The settlement is server-calculated from the damage saved when the car was parked:
+        // every lost health point counts as $2 of repair, the insurer pays a percentage, a
+        // deductible is taken off and the result is capped. A claim repairs the stored car.
+        int Quote(int engine, int body)
+        {
+            int repairCost = Math.Max(0, 1000 - engine) * 2 + Math.Max(0, 1000 - body) * 2;
+            long settlement = (long)repairCost * _insurancePercent / 100 - _insuranceDeductible;
+            if (settlement < 0) settlement = 0;
+            if (settlement > _insuranceMax) settlement = _insuranceMax;
+            return (int)settlement;
+        }
+
+        void ListInsurance(Player p, List<object> args)
+        {
+            string license = License(p);
+            if (license == null) return;
+
+            Say(p, $"Insurance: {_insurancePercent}% of the repair cost, ${_insuranceDeductible} deductible, " +
+                   $"max ${_insuranceMax}; one claim per vehicle every {_insuranceCooldownSeconds / 60} min.");
+
+            Query("SELECT id, model, plate, state, stolen, engine, body FROM player_vehicles WHERE owner = ? ORDER BY id",
+                new object[] { license }, rows =>
+                {
+                    if (rows.Count == 0) { Say(p, "Your garage is empty."); return; }
+
+                    foreach (var r in rows)
+                    {
+                        int id = Convert.ToInt32(r["id"]);
+                        string model = r["model"].ToString(), plate = r["plate"].ToString();
+
+                        if (Convert.ToInt32(r["state"]) != 1)
+                        {
+                            Say(p, $"#{id} {model} [{plate}] - out (store it before claiming)");
+                            continue;
+                        }
+                        if (Convert.ToInt32(r["stolen"]) == 1)
+                        {
+                            Say(p, $"#{id} {model} [{plate}] - stolen (the police must recover it)");
+                            continue;
+                        }
+
+                        int quote = Quote(Convert.ToInt32(r["engine"]), Convert.ToInt32(r["body"]));
+                        Say(p, quote >= MinClaim
+                            ? $"#{id} {model} [{plate}] - estimated claim ${quote}"
+                            : $"#{id} {model} [{plate}] - no damage");
+                    }
+                });
+        }
+
+        void Claim(Player p, List<object> args)
+        {
+            if (args.Count < 1 || !int.TryParse(args[0]?.ToString(), out int id) || id <= 0)
+            {
+                Say(p, "Usage: /claim <vehicle id>  (see /insurance)");
+                return;
+            }
+
+            string license = License(p);
+            if (license == null) return;
+
+            Query("SELECT model, plate, state, stolen, engine, body FROM player_vehicles WHERE id = ? AND owner = ?",
+                new object[] { id, license }, rows =>
+                {
+                    if (rows.Count == 0) { Say(p, "That vehicle is not yours."); return; }
+
+                    var row = rows[0];
+                    string model = row["model"].ToString(), plate = row["plate"].ToString();
+
+                    if (Convert.ToInt32(row["state"]) != 1) { Say(p, "Store the vehicle before claiming."); return; }
+                    if (Convert.ToInt32(row["stolen"]) == 1) { Say(p, "A stolen vehicle can't be claimed; the police must recover it first."); return; }
+
+                    int engine = Convert.ToInt32(row["engine"]), body = Convert.ToInt32(row["body"]);
+                    int quote = Quote(engine, body);
+                    if (quote < MinClaim)
+                    {
+                        Say(p, $"There is not enough damage to claim (estimated ${quote}).");
+                        return;
+                    }
+
+                    Query("SELECT COUNT(*) AS c FROM insurance_claims WHERE plate = ? AND TIMESTAMPDIFF(SECOND, created_at, NOW()) < ?",
+                        new object[] { plate, _insuranceCooldownSeconds }, cooldownRows =>
+                        {
+                            int recent = cooldownRows.Count > 0 ? Convert.ToInt32(cooldownRows[0]["c"]) : 0;
+                            if (recent > 0)
+                            {
+                                Say(p, $"This vehicle was claimed within the last {_insuranceCooldownSeconds / 60} min.");
+                                return;
+                            }
+
+                            // Repair only if the car is still stored, still not stolen, and still
+                            // has the exact damage this quote was calculated from.
+                            Db("UPDATE player_vehicles SET engine = 1000, body = 1000 " +
+                               "WHERE id = ? AND owner = ? AND state = 1 AND stolen = 0 AND engine = ? AND body = ?",
+                               new object[] { id, license, engine, body }, affected =>
+                               {
+                                   if (affected != 1) { Say(p, "The vehicle changed; check /garage and try again."); return; }
+
+                                   Insert("INSERT INTO insurance_claims (license, plate, model, amount) VALUES (?, ?, ?, ?)",
+                                       new object[] { license, plate, model, quote }, rawClaimId =>
+                                       {
+                                           int claimId = Convert.ToInt32(rawClaimId);
+                                           if (claimId <= 0)
+                                           {
+                                               Say(p, $"{model} [{plate}] was repaired, but the claim could not be recorded.");
+                                               return;
+                                           }
+
+                                           bool paid = false;
+                                           try { paid = (bool)Exports["bank-cs"].addBank(int.Parse(p.Handle), quote, "insurance claim"); }
+                                           catch (Exception e) { Debug.WriteLine("[garage] insurance payout failed, bank-cs unavailable: " + e.Message); }
+
+                                           if (paid)
+                                               Db("UPDATE insurance_claims SET paid = 1 WHERE id = ?", new object[] { claimId }, _ => { });
+
+                                           Say(p, paid
+                                               ? $"Claim #{claimId}: {model} [{plate}] repaired, ${quote} paid to your bank."
+                                               : $"Claim #{claimId}: {model} [{plate}] repaired, but the bank could not pay the settlement.");
+                                           Debug.WriteLine($"[garage] insurance claim #{claimId} {license} [{plate}] ${quote} paid={paid}");
+                                       });
+                               });
+                        });
                 });
         }
 

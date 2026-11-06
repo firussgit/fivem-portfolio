@@ -179,9 +179,9 @@ set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call 
 set dispatch_scene_radius 40          # metres: how close a unit must be to mark on scene / resolve
 set dispatch_call_ttl_minutes 15      # calls left open this long expire
 set dispatch_call_cooldown_seconds 20 # minimum gap between a player's 911 calls
-set dealer_showroom_x -45.0           # dealership showroom position (dealer-cs)
-set dealer_showroom_y -1098.0
-set dealer_showroom_z 26.4
+set dealer_showroom_x -56.8          # dealership marker on the PDM forecourt (dealer-cs)
+set dealer_showroom_y -1109.9        # keep it outside: the vanilla showroom floor is not
+set dealer_showroom_z 25.44          # streamed on every client, so standing inside drops you
 set dealer_range 8                    # metres: how close a player must be to buy / rent / sell / test drive
 set dealer_testdrive_seconds 90       # test drive limit
 set dealer_sell_min_percent 35        # trade-in offer for a wrecked car
@@ -243,6 +243,7 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/lock` | garage-cs | Locks / unlocks your nearest owned or shared vehicle (key **L**) | `/lock` |
 | `/engine` | garage-cs | Engine on / off for the vehicle you're in (key **K**) | `/engine` |
 | `/locate` | garage-cs | Blips and a GPS route to your vehicles (and shared ones) that are out | `/locate` |
+| `/vehicle` | garage-cs | Shows the nearest vehicle's plate, engine and body health (what `/park` would save) | `/vehicle` |
 | *Use* `lockpick` | inventory-cs + garage-cs | Hotwire a registered car that belongs to someone else (8 s, consumes the lockpick) | Use a lockpick from the inventory next to the car |
 | `/insurance` | garage-cs | Lists your stored cars with the estimated insurance payout | `/insurance` |
 | `/claim <vehicle id>` | garage-cs | Repairs a stored, damaged car and pays the settlement to your bank | `/claim 4` |
@@ -551,7 +552,7 @@ Requires `oxmysql` and `bank-cs`.
 
 A phone with its own number, contacts, texting and phone banking, backed by MySQL.
 
-- **Numbers belong to the licence.** Each player gets a unique `555-xxxx` number the first time and keeps it.
+- **Numbers belong to the licence.** Each player gets a unique 7-digit `555xxxx` number the first time and keeps it.
 - **No spoofing.** The "from" of a message is the server's own record of who the sender is; the NUI only
   says who to send to and what to say. Input is cleaned, length-limited and rate-limited.
 - **Live and offline delivery.** Messages are stored; an online recipient gets a push and a notification,

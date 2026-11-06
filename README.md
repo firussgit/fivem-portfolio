@@ -25,7 +25,7 @@ and answers with the new truth.
 | Resource | Language | What it shows |
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
-| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
+| [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, vehicle keys and sharing, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
 | [`dealer-cs`](dealer-cs) | C# + MySQL + NUI | Player dealership: server-priced showroom, cash/bank purchases, timed rentals, free test drives and condition-based trade-ins |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
@@ -97,6 +97,7 @@ and answers with the new truth.
 | **Anti-teleport checks.** A job stop, a dispatch "on scene" or a race checkpoint only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch, races |
 | **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races, dealer test drives |
 | **Expiry that survives a relog.** A lease is a wall-clock timestamp in the database, and the spawned car is verified like a test car, so closing the game can't freeze or reset the clock. | dealer rentals |
+| **Explicit, revocable access.** Sharing a vehicle is a row with a unique `(vehicle, player)` pair, checked again on every key action, not a one-off unlock, so revoking it works while the car is out. | garage keys |
 | **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim, dealer sell, rental start |
 | **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
 | **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone, dealer |
@@ -161,6 +162,7 @@ set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can 
 set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
 set police_fine_max 2500              # largest fine a police officer can issue
 set garage_hotwire_seconds 8          # how long a lockpick takes to hotwire a stolen car
+set garage_max_keys 5                 # most players who can be given a key to one vehicle
 set insurance_payout_percent 50       # share of the repair cost paid on an insurance claim
 set insurance_payout_max 2500         # hard cap on one claim settlement
 set insurance_deductible 250          # taken off each claim settlement
@@ -223,11 +225,15 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/withdraw <amount>` | bank-cs | Bank → cash (**at an ATM**) | `/withdraw 100` |
 | `/transfer <id> <amount>` | bank-cs | Send bank money to a player (**at an ATM**) | `/transfer 3 500` |
 | `/garage` | garage-cs | Lists your stored vehicles with their ids | `/garage` |
-| `/takeout <vehicle id>` | garage-cs | Spawns a stored vehicle next to you | `/takeout 4` |
-| `/park` | garage-cs | Stores the vehicle you're in or next to | `/park` |
-| `/lock` | garage-cs | Locks / unlocks your nearest vehicle (key **L**) | `/lock` |
+| `/takeout <vehicle id>` | garage-cs | Spawns a stored vehicle you own or have a key to | `/takeout 4` |
+| `/park` | garage-cs | Stores the vehicle you're in or next to (a shared car returns to its owner) | `/park` |
+| `/keys [vehicle id]` | garage-cs | Shows who has a key to your vehicles (or one vehicle) | `/keys 4` |
+| `/givekey <vehicle id> <player>` | garage-cs | Gives a player a key to one of your vehicles (server id or unique name) | `/givekey 4 Alex` |
+| `/takekey <vehicle id> <player\|all>` | garage-cs | Revokes one key, or every key, to one of your vehicles | `/takekey 4 all` |
+| `/shared` | garage-cs | Lists the vehicles other players have given you a key to | `/shared` |
+| `/lock` | garage-cs | Locks / unlocks your nearest owned or shared vehicle (key **L**) | `/lock` |
 | `/engine` | garage-cs | Engine on / off for the vehicle you're in (key **K**) | `/engine` |
-| `/locate` | garage-cs | Blips and a GPS route to your vehicles that are out | `/locate` |
+| `/locate` | garage-cs | Blips and a GPS route to your vehicles (and shared ones) that are out | `/locate` |
 | *Use* `lockpick` | inventory-cs + garage-cs | Hotwire a registered car that belongs to someone else (8 s, consumes the lockpick) | Use a lockpick from the inventory next to the car |
 | `/insurance` | garage-cs | Lists your stored cars with the estimated insurance payout | `/insurance` |
 | `/claim <vehicle id>` | garage-cs | Repairs a stored, damaged car and pays the settlement to your bank | `/claim 4` |
@@ -314,7 +320,7 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 ## Try it: a five-minute tour
 
 1. **Money.** `/balance`, walk to an ATM and press **E**, deposit some cash.
-2. **A car.** `/givecar comet2`, `/garage`, `/takeout 1`. Drive a bit, then `/park` and take it out again.
+2. **A car.** `/givecar comet2`, `/garage`, `/takeout 1`. Drive a bit, then `/park` and take it out again. With a second player, `/givekey 1 <their id>`: they `/shared`, `/takeout 1` and can lock, drive and park it. Run `/takekey 1 <their id>` while they are driving: their next **L**/**K** or `/park` is refused and the server cuts the engine.
 3. **Controls.** Press **L** (the car chirps), **K** (engine off), walk away and use `/locate`.
 4. **Fuel.** Stand at a pump and run `/setfuel`. Watch the `FUEL %` gauge drop while driving, then pull up to the pump and press **E**. The fuel level survives `/park` and `/takeout`.
 5. **Customs.** Run `/setcustoms` in a garage forecourt, drive in and press **E**. Move the sliders (the car changes live, the price comes from the server), then **Buy & save**. Park and take the car out: the mods are still there.
@@ -370,23 +376,35 @@ claim a car it doesn't own.
 - **MySQL via oxmysql.** `player_vehicles` (owner license, model, unique plate, stored/out
   state, a `stolen` flag, engine and body health, plus `mods` and `fuel` columns used by customs
   and fuel). The table is created on start; see `sql/install.sql`.
-- **Atomic take-out.** `UPDATE ... WHERE id = ? AND owner = ? AND state = 1` checks ownership
-  *and* that the car is stored in one statement, so two simultaneous requests can never both
-  spawn the same vehicle.
+- **Atomic take-out.** `UPDATE ... LEFT JOIN vehicle_keys ... WHERE id = ? AND state = 1 AND
+  (owner = ? OR grant exists)` checks access *and* that the car is stored in one statement, so two
+  simultaneous requests can never both spawn the same vehicle. A car taken out with a shared key
+  is still tracked in its owner's garage: parking, theft recovery and a disconnect all return it
+  there.
+- **Vehicle keys and sharing.** An owner can give another player a key to one specific car
+  (`/givekey <vehicle id> <player>`), list who has one (`/keys [vehicle id]`) and take it back
+  (`/takekey <vehicle id> <player|all>`, or `/shared` on the receiving side). A grant belongs to
+  the stable `player_vehicles.id`, not the plate, and lives in `vehicle_keys` with a unique
+  `(vehicle_id, grantee)` pair and a foreign key that deletes it with the car. The owner always
+  keeps access; a grantee may take the car out, lock, toggle the engine, locate and park it. The
+  ACL is checked again on **every** key action from an in-memory cache kept in step with the table,
+  so a revocation takes effect on the next action even while the car is out; if the player is
+  sitting in it, the server also tells their client to keep the engine off. Selling, insurance,
+  hotwiring and the dealer flows stay owner-only.
 - **Dealer delivery.** A server-only `deliver(src, plate)` export lets `dealer-cs` hand a freshly
   bought, stored row to the normal spawn path. It re-checks that the row is that player's and still
   stored, and if the buyer drops mid-delivery the row goes back to the garage instead of being
   left "out" with nobody tracking it.
 - **Server-verified parking (OneSync).** `/park` sends only a network id and the condition.
-  The server resolves the real entity, reads its plate, checks that this player took that
-  plate out, and only then stores and deletes it. A stolen car can't be parked away.
+  The server resolves the real entity, reads its plate, checks that this player owns the car or
+  holds a key to it, and only then stores and deletes it. A stolen car can't be parked away.
 - **Hotwire theft.** Using a `lockpick` (`inventory-cs`) next to someone else's car sends only
   the vehicle's network id. The server resolves the real entity, checks the plate is registered,
-  out, owned by someone else and unoccupied, consumes the lockpick, then runs the
-  `garage_hotwire_seconds` timer itself before setting `stolen = 1`. The client can't skip the
-  wait or claim a car it isn't standing next to. The owner is told in chat to call 911; police
-  `/impound` (jobs-cs) recovers the car, which clears the flag and returns it to the garage.
-  `/garage` shows `STOLEN (call the police)` while it is out.
+  out, owned by someone else, unoccupied and not already shared with the player, consumes the
+  lockpick, then runs the `garage_hotwire_seconds` timer itself before setting `stolen = 1`. The
+  client can't skip the wait or claim a car it isn't standing next to. The owner is told in chat
+  to call 911; police `/impound` (jobs-cs) recovers the car, which clears the flag and returns it
+  to the garage. `/garage` shows `STOLEN (call the police)` while it is out.
 - **Insurance claims.** `/insurance` quotes a settlement for each stored car from the damage saved
   on its row; `/claim <id>` repairs it and pays the settlement to the player's bank. The quote is
   `2 × lost health points × insurance_payout_percent` minus `insurance_deductible`, capped by
@@ -395,14 +413,17 @@ claim a car it doesn't own.
   appended to `insurance_claims` with a `paid` flag.
 - **Whitelisted models, capped garage size (10), rate limiting, clamped inputs.**
 - **Vehicle controls.** `L` locks/unlocks, `K` toggles the engine, `/locate` shows where your
-  vehicles are (blips plus a GPS waypoint to the nearest). The client sends only *which* vehicle;
-  the server resolves the real entity, checks it carries a plate this player took out, checks
-  distance (or that they're sitting in it, for the engine), flips its own record of the state and
-  tells the client what to apply. Positions for `/locate` are read from the real entities on the server.
+  vehicles and the ones shared with you are (blips plus a GPS waypoint to the nearest). The client
+  sends only *which* vehicle; the server resolves the real entity, checks that this player owns it
+  or holds a live key, checks distance (or that they're sitting in it, for the engine), flips its
+  own record of the state and tells the client what to apply. Positions for `/locate` are read from
+  the real entities on the server.
 - **Opaque mods.** The garage stores a `mods` string it doesn't understand and announces
   `garage:vehicleSpawned` with it; `customs-cs` interprets it.
 - **Clean state.** Cars of a player who disconnects, and every car after a server restart,
-  go back to the garage instead of staying marked "out".
+  go back to the garage instead of staying marked "out". A shared car being used by someone else
+  stays in the world when its owner disconnects, and returns to the owner's garage when the key
+  holder leaves with it.
 
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync. `inventory-cs` is optional:
 without it the garage still works, but lockpicks can't start a hotwire.

@@ -23,6 +23,7 @@ set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can 
 set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
 set police_fine_max 2500              # largest fine a police officer can issue
 set garage_hotwire_seconds 8          # how long a lockpick takes to hotwire a stolen car
+set garage_max_keys 5                 # most players who can be given a key to one vehicle
 set insurance_payout_percent 50       # share of the repair cost paid on an insurance claim
 set insurance_payout_max 2500         # hard cap on one claim settlement
 set insurance_deductible 250          # taken off each claim settlement

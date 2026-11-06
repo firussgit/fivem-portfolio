@@ -49,6 +49,23 @@ namespace Garage.Server
         readonly HashSet<string> _engineOff = new HashSet<string>();
         const float InteractRange = 15f;
 
+        // Vehicle keys. A grant belongs to the stable player_vehicles.id, never a plate, so a
+        // re-registered plate can't inherit it. The rows in vehicle_keys are the truth; these
+        // caches mirror them so lock/engine can be answered without a query, and every grant,
+        // revoke and startup load keeps them in step.
+        class VehicleRef
+        {
+            public int Id;
+            public string Owner;
+            public string Model;
+        }
+
+        readonly Dictionary<string, VehicleRef> _vehicles = new Dictionary<string, VehicleRef>();     // plate -> row
+        readonly Dictionary<int, VehicleRef> _vehiclesById = new Dictionary<int, VehicleRef>();       // id -> row
+        readonly Dictionary<int, HashSet<string>> _grants = new Dictionary<int, HashSet<string>>();   // vehicle id -> grantees
+        readonly Dictionary<string, string> _heldBy = new Dictionary<string, string>();               // plate -> taker licence
+        int _maxKeysPerVehicle;
+
         // A player can only work one lock at a time.
         public GarageServer()
         {
@@ -59,6 +76,10 @@ namespace Garage.Server
             Cmd("theftcar", TheftCar);
             Cmd("insurance", ListInsurance);
             Cmd("claim", Claim);
+            Cmd("keys", ListKeys);
+            Cmd("givekey", GiveKey);
+            Cmd("takekey", TakeKey);
+            Cmd("shared", ListShared);
 
             // Server-only: jobs-cs validates and records a police impound, then asks the garage to
             // remove the live entity and its cache so the vehicle can be taken out again later.
@@ -73,6 +94,7 @@ namespace Garage.Server
             _insuranceMax = Math.Max(0, Math.Min(100000, GetConvarInt("insurance_payout_max", 2500)));
             _insuranceDeductible = Math.Max(0, Math.Min(10000, GetConvarInt("insurance_deductible", 250)));
             _insuranceCooldownSeconds = Math.Max(0, Math.Min(10080, GetConvarInt("insurance_claim_cooldown_minutes", 30))) * 60L;
+            _maxKeysPerVehicle = Math.Max(1, Math.Min(20, GetConvarInt("garage_max_keys", 5)));
 
             try
             {
@@ -89,7 +111,13 @@ namespace Garage.Server
                            Db("ALTER TABLE player_vehicles ADD COLUMN IF NOT EXISTS stolen TINYINT NOT NULL DEFAULT 0", new object[0], ___ =>
                                // After a restart nobody's cars are in the world any more: return them all to the garage.
                                Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE state = 0", new object[0],
-                                  n => Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage")))));
+                                  n =>
+                                  {
+                                      Debug.WriteLine($"[garage] ready, {n} vehicle(s) returned to garage");
+                                      // Only now is player_vehicles certainly present, so the key table can
+                                      // reference it and the cache can be loaded in one ordered step.
+                                      SetupKeys();
+                                  }))));
             }
             catch (Exception e)
             {
@@ -133,6 +161,61 @@ namespace Garage.Server
         void Insert(string sql, object[] args, Action<int> done)
         {
             Exports["oxmysql"].insert(sql, args, new Action<dynamic>(id => done(id == null ? 0 : Convert.ToInt32(id))));
+        }
+
+        // ---------- keys: schema and cache ----------
+
+        // Ran once the vehicle table is definitely there. The foreign key makes a sale (which
+        // deletes the player_vehicles row) take its grants with it, so a later car can never
+        // inherit somebody else's keys by reusing an id.
+        void SetupKeys()
+        {
+            Db("CREATE TABLE IF NOT EXISTS vehicle_keys (" +
+               "id INT AUTO_INCREMENT PRIMARY KEY, " +
+               "vehicle_id INT NOT NULL, owner VARCHAR(64) NOT NULL, grantee VARCHAR(64) NOT NULL, " +
+               "owner_name VARCHAR(64) NULL, grantee_name VARCHAR(64) NULL, " +
+               "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+               "UNIQUE KEY uq_vehicle_grantee (vehicle_id, grantee), " +
+               "INDEX idx_grantee (grantee), INDEX idx_owner (owner), " +
+               "CONSTRAINT fk_keys_vehicle FOREIGN KEY (vehicle_id) REFERENCES player_vehicles(id) ON DELETE CASCADE)",
+               new object[0], _ =>
+               {
+                   Debug.WriteLine("[garage] keys table ready");
+                   LoadKeyCache();
+               });
+        }
+
+        // Read every owned row and every grant once, so a key action can be answered from memory
+        // and a revocation is effective on the very next action, not just the next respawn.
+        void LoadKeyCache()
+        {
+            Query("SELECT id, owner, model, plate FROM player_vehicles", new object[0], rows =>
+            {
+                foreach (var row in rows)
+                {
+                    var v = new VehicleRef
+                    {
+                        Id = Convert.ToInt32(row["id"]),
+                        Owner = row["owner"].ToString(),
+                        Model = row["model"].ToString()
+                    };
+                    _vehicles[row["plate"].ToString()] = v;
+                    _vehiclesById[v.Id] = v;
+                }
+
+                Query("SELECT vehicle_id, grantee FROM vehicle_keys", new object[0], grants =>
+                {
+                    foreach (var row in grants)
+                    {
+                        int id = Convert.ToInt32(row["vehicle_id"]);
+                        if (!_grants.TryGetValue(id, out var set)) _grants[id] = set = new HashSet<string>();
+                        set.Add(row["grantee"].ToString());
+                    }
+
+                    int total = _grants.Values.Sum(set => set.Count);
+                    Debug.WriteLine($"[garage] key cache: {_vehicles.Count} vehicle(s), {total} grant(s)");
+                });
+            });
         }
 
         // ---------- commands ----------
@@ -186,32 +269,306 @@ namespace Garage.Server
             });
         }
 
+        // ---------- keys: sharing ----------
+
+        // Owners see who holds a key to each car. A single id (or none) is enough: /keys and
+        // /givekey use the same vehicle id the garage already prints.
+        void ListKeys(Player p, List<object> args)
+        {
+            string license = License(p);
+            if (license == null) return;
+
+            int only = 0;
+            if (args.Count > 0 && (!int.TryParse(args[0]?.ToString(), out only) || only <= 0))
+            {
+                Say(p, "Usage: /keys [vehicle id]");
+                return;
+            }
+
+            Query("SELECT v.id, v.model, v.plate, k.grantee_name, k.grantee " +
+                  "FROM player_vehicles v LEFT JOIN vehicle_keys k ON k.vehicle_id = v.id " +
+                  "WHERE v.owner = ?" + (only > 0 ? " AND v.id = ?" : "") + " ORDER BY v.id, k.id",
+                only > 0 ? new object[] { license, only } : new object[] { license }, rows =>
+                {
+                    if (rows.Count == 0) { Say(p, only > 0 ? "That vehicle is not yours." : "Your garage is empty."); return; }
+
+                    int current = 0;
+                    foreach (var r in rows)
+                    {
+                        int id = Convert.ToInt32(r["id"]);
+                        if (id != current)
+                        {
+                            current = id;
+                            Say(p, $"#{id}  {r["model"]}  [{r["plate"]}]");
+                        }
+
+                        if (string.IsNullOrEmpty(r["grantee"]?.ToString())) continue; // the LEFT JOIN produced no grant
+                        string name = string.IsNullOrEmpty(r["grantee_name"]?.ToString())
+                            ? "a player" : r["grantee_name"].ToString();
+                        Say(p, $"    key: {name}");
+                    }
+
+                    Say(p, "Give: /givekey <vehicle id> <player id or name>. Take back: /takekey <vehicle id> <player>.");
+                });
+        }
+
+        void GiveKey(Player p, List<object> args)
+        {
+            if (args.Count < 2 || !int.TryParse(args[0]?.ToString(), out int id) || id <= 0)
+            {
+                Say(p, "Usage: /givekey <vehicle id> <player id or name>  (see /keys)");
+                return;
+            }
+
+            string license = License(p);
+            if (license == null) return;
+
+            if (!ResolveTarget(p, string.Join(" ", args.Skip(1)), out Player target, out string error))
+            {
+                Say(p, error);
+                return;
+            }
+
+            string targetLicense = License(target);
+            if (targetLicense == null) { Say(p, "That player has no license identifier."); return; }
+            if (targetLicense == license) { Say(p, "You already have the keys to your own vehicle."); return; }
+
+            Query("SELECT id, model, plate FROM player_vehicles WHERE id = ? AND owner = ?",
+                new object[] { id, license }, rows =>
+                {
+                    if (rows.Count == 0) { Say(p, "That vehicle is not yours."); return; }
+
+                    var row = rows[0];
+                    string model = row["model"].ToString(), plate = row["plate"].ToString();
+
+                    if (HasKey(id, targetLicense))
+                    {
+                        Say(p, $"{target.Name} already has a key to the {model} [{plate}].");
+                        return;
+                    }
+
+                    int count = _grants.TryGetValue(id, out var set) ? set.Count : 0;
+                    if (count >= _maxKeysPerVehicle)
+                    {
+                        Say(p, $"That vehicle already has the maximum of {_maxKeysPerVehicle} keys.");
+                        return;
+                    }
+
+                    // INSERT IGNORE plus the unique key makes a double-click idempotent. The row's
+                    // owner is taken from the checked row, never from the client.
+                    Db("INSERT IGNORE INTO vehicle_keys (vehicle_id, owner, grantee, owner_name, grantee_name) " +
+                       "VALUES (?, ?, ?, ?, ?)",
+                        new object[] { id, license, targetLicense, Name(p), Name(target) }, affected =>
+                        {
+                            if (affected != 1) { Say(p, "Could not give that key; try again."); return; }
+
+                            Grant(id, targetLicense);
+                            Say(p, $"{target.Name} now has a key to the {model} [{plate}].");
+                            Say(target, $"{p.Name} gave you a key to their {model} [{plate}]. " +
+                                        $"Use /shared to see it and /takeout {id} to take it out.");
+                            Debug.WriteLine($"[garage] {license} granted a key to {targetLicense} for #{id} [{plate}]");
+                        });
+                });
+        }
+
+        void TakeKey(Player p, List<object> args)
+        {
+            if (args.Count < 2 || !int.TryParse(args[0]?.ToString(), out int id) || id <= 0)
+            {
+                Say(p, "Usage: /takekey <vehicle id> <player id or name|all>  (see /keys)");
+                return;
+            }
+
+            string license = License(p);
+            if (license == null) return;
+
+            string who = string.Join(" ", args.Skip(1)).Trim();
+
+            Query("SELECT model, plate FROM player_vehicles WHERE id = ? AND owner = ?",
+                new object[] { id, license }, rows =>
+                {
+                    if (rows.Count == 0) { Say(p, "That vehicle is not yours."); return; }
+
+                    string model = rows[0]["model"].ToString(), plate = rows[0]["plate"].ToString();
+
+                    if (who.Equals("all", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Db("DELETE FROM vehicle_keys WHERE vehicle_id = ? AND owner = ?",
+                            new object[] { id, license }, affected =>
+                            {
+                                if (affected <= 0) { Say(p, $"No one had a key to the {model} [{plate}]."); return; }
+
+                                // Check every revoked grantee, not just whoever the car is registered
+                                // as being out with: a passenger can have taken the wheel over.
+                                var revoked = _grants.TryGetValue(id, out var set) ? set.ToList() : new List<string>();
+                                if (_grants.TryGetValue(id, out var all)) all.Clear();
+                                foreach (string grantee in revoked) DisableIfDriving(FindByLicense(grantee), plate);
+
+                                Say(p, $"All keys to the {model} [{plate}] were revoked.");
+                                Debug.WriteLine($"[garage] {license} revoked all {affected} key(s) for #{id} [{plate}]");
+                            });
+                        return;
+                    }
+
+                    if (!ResolveTarget(p, who, out Player target, out string error)) { Say(p, error); return; }
+                    string targetLicense = License(target);
+                    if (targetLicense == null) return;
+
+                    Db("DELETE FROM vehicle_keys WHERE vehicle_id = ? AND owner = ? AND grantee = ?",
+                        new object[] { id, license, targetLicense }, affected =>
+                        {
+                            if (affected != 1)
+                            {
+                                Say(p, $"{target.Name} does not have a key to the {model} [{plate}].");
+                                return;
+                            }
+
+                            Revoke(id, targetLicense);
+                            Say(p, $"Revoked {target.Name}'s key to the {model} [{plate}].");
+                            Say(target, $"{p.Name} took back your key to their {model} [{plate}].");
+                            // A revocation must also stop an already-moving car, not just the next action.
+                            DisableIfDriving(target, plate);
+                            Debug.WriteLine($"[garage] {license} revoked {targetLicense}'s key for #{id} [{plate}]");
+                        });
+                });
+        }
+
+        // The other side of sharing: the cars someone else has given this player a key to.
+        void ListShared(Player p, List<object> args)
+        {
+            string license = License(p);
+            if (license == null) return;
+
+            Query("SELECT v.id, v.model, v.plate, v.state, k.owner_name " +
+                  "FROM vehicle_keys k JOIN player_vehicles v ON v.id = k.vehicle_id " +
+                  "WHERE k.grantee = ? ORDER BY v.id", new object[] { license }, rows =>
+            {
+                if (rows.Count == 0) { Say(p, "No one has shared a vehicle with you."); return; }
+
+                Say(p, "Shared with you (use /takeout <id>):");
+                foreach (var r in rows)
+                {
+                    bool stored = Convert.ToInt32(r["state"]) == 1;
+                    string by = string.IsNullOrEmpty(r["owner_name"]?.ToString())
+                        ? "its owner" : r["owner_name"].ToString();
+                    Say(p, $"#{r["id"]}  {r["model"]}  [{r["plate"]}]  {(stored ? "in garage" : "OUT")}  - from {by}");
+                }
+            });
+        }
+
+        // Server id first, then a unique name fragment. An ambiguous name is refused rather than
+        // guessed, so a key always goes to the player the owner meant.
+        bool ResolveTarget(Player p, string query, out Player target, out string error)
+        {
+            target = null;
+            error = null;
+            query = (query ?? "").Trim();
+            if (query.Length == 0) { error = "Say which player: a server id or name."; return false; }
+
+            if (int.TryParse(query, out int src))
+            {
+                if (src <= 0) { error = "No player with that server id."; return false; }
+                target = Players[src];
+                if (target == null) { error = "No player with that server id."; return false; }
+                return true;
+            }
+
+            var matches = Players.ToList()
+                .Where(x => x != null && x.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            if (matches.Count == 0) { error = "No player matches that name."; return false; }
+            if (matches.Count > 1) { error = "More than one player matches; use their server id (/players)."; return false; }
+
+            target = matches[0];
+            return true;
+        }
+
+        bool HasKey(int vehicleId, string license) =>
+            license != null && _grants.TryGetValue(vehicleId, out var set) && set.Contains(license);
+
+        void Grant(int vehicleId, string license)
+        {
+            if (!_grants.TryGetValue(vehicleId, out var set)) _grants[vehicleId] = set = new HashSet<string>();
+            set.Add(license);
+        }
+
+        void Revoke(int vehicleId, string license)
+        {
+            if (_grants.TryGetValue(vehicleId, out var set)) set.Remove(license);
+        }
+
+        // If the player is sitting in that car when a key is taken away, ask their client to keep
+        // the engine off, so revocation means "no longer driving", not only "no longer locking".
+        void DisableIfDriving(Player target, string plate)
+        {
+            if (target == null) return;
+            int ped = GetPlayerPed(target.Handle);
+            if (ped == 0) return;
+
+            int vehicle = GetVehiclePedIsIn(ped, false);
+            if (vehicle == 0 || !DoesEntityExist(vehicle)) return;
+            if ((GetVehicleNumberPlateText(vehicle) ?? "").Trim() != plate) return;
+
+            TriggerClientEvent(target, "garage:applyEngine", NetworkGetNetworkIdFromEntity(vehicle), false);
+        }
+
+        static string Name(Player p)
+        {
+            string name = (p?.Name ?? "player").Trim();
+            return name.Length > 64 ? name.Substring(0, 64) : name;
+        }
+
         void TakeOut(Player p, List<object> args)
         {
             if (args.Count < 1 || !int.TryParse(args[0]?.ToString(), out int id) || id <= 0)
             {
-                Say(p, "Usage: /takeout <vehicle id>  (see /garage)");
+                Say(p, "Usage: /takeout <vehicle id>  (see /garage or /shared)");
                 return;
             }
             string license = License(p);
             if (license == null) return;
 
-            // One atomic statement checks ownership AND that it's stored, then flips it.
-            // Two simultaneous requests can never both succeed: only one sees affected == 1.
-            Db("UPDATE player_vehicles SET state = 0 WHERE id = ? AND owner = ? AND state = 1", new object[] { id, license }, affected =>
-            {
-                if (affected != 1) { Say(p, "That vehicle doesn't exist, isn't yours, or is already out."); return; }
-
-                Query("SELECT model, plate, engine, body, mods FROM player_vehicles WHERE id = ?", new object[] { id }, rows =>
+            // One atomic statement checks that the row exists, is stored, and that this player may
+            // use it (owner, or a live grant), then flips it. Two simultaneous requests can never
+            // both succeed: only one sees affected == 1. The key join is on the stable row id.
+            Db("UPDATE player_vehicles v " +
+               "LEFT JOIN vehicle_keys k ON k.vehicle_id = v.id AND k.grantee = ? " +
+               "SET v.state = 0 " +
+               "WHERE v.id = ? AND v.state = 1 AND v.stolen = 0 AND (v.owner = ? OR k.grantee IS NOT NULL)",
+                new object[] { license, id, license }, affected =>
                 {
-                    var v = rows[0];
-                    string plate = v["plate"].ToString();
-                    Track(license).Add(plate);
-                    TriggerClientEvent(p, "garage:spawn", v["model"].ToString(), plate, Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]),
-                                       v["mods"] == null ? "" : v["mods"].ToString());
-                    Debug.WriteLine($"[garage] {p.Name} took out #{id} [{plate}]");
+                    if (affected != 1)
+                    {
+                        Say(p, "That vehicle doesn't exist, isn't yours or shared with you, or is already out.");
+                        return;
+                    }
+
+                    Query("SELECT owner, model, plate, engine, body, mods FROM player_vehicles WHERE id = ?",
+                        new object[] { id }, rows =>
+                        {
+                            if (rows.Count != 1) return;
+
+                            var v = rows[0];
+                            string owner = v["owner"].ToString();
+                            string plate = v["plate"].ToString();
+                            string model = v["model"].ToString();
+
+                            var reference = new VehicleRef { Id = id, Owner = owner, Model = model };
+                            _vehicles[plate] = reference;
+                            _vehiclesById[id] = reference;
+
+                            // The car belongs to the owner's garage even when a key holder takes it
+                            // out, so parking, theft recovery and a disconnect all return it there.
+                            Track(owner).Add(plate);
+                            _heldBy[plate] = license;
+
+                            TriggerClientEvent(p, "garage:spawn", model, plate, Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]),
+                                               v["mods"] == null ? "" : v["mods"].ToString());
+                            if (owner != license) Say(p, $"You took out {model} [{plate}] with the owner's key.");
+                            Debug.WriteLine($"[garage] {p.Name} ({license}) took out #{id} [{plate}] owned by {owner}");
+                        });
                 });
-            });
         }
 
         // Dev helper: a car registered to a fake owner, spawned next to you. It is a normal
@@ -366,13 +723,15 @@ namespace Garage.Server
 
         // ---------- events from the client ----------
 
-        // The client reports the network id of the vehicle it just spawned. We only accept it if the real
-        // entity carries the plate this player legitimately took out.
+        // The client reports the network id of the vehicle it just spawned. We only accept it if
+        // the real entity carries the plate, and the sender is the player who took that plate out
+        // (owner or key holder) -- the owner's tracking set alone is no longer proof of that.
         [EventHandler("garage:spawned")]
         void OnSpawned([FromSource] Player p, int netId, string plate)
         {
             string license = p == null ? null : License(p);
-            if (license == null || plate == null || !Track(license).Contains(plate)) return;
+            if (license == null || string.IsNullOrEmpty(plate)) return;
+            if (!_heldBy.TryGetValue(plate, out string holder) || holder != license) return;
 
             int entity = NetworkGetEntityFromNetworkId(netId);
             if (entity == 0 || !DoesEntityExist(entity)) return;
@@ -403,7 +762,8 @@ namespace Garage.Server
         {
             if (p == null || RateLimited(int.Parse(p.Handle))) return;
             string plate;
-            int entity = OwnedVehicle(p, netId, out plate);
+            VehicleRef vehicle;
+            int entity = UsableVehicle(p, netId, out plate, out vehicle);
             if (entity == 0) { Say(p, "You don't have the keys to that vehicle."); return; }
 
             // The player must actually be near it (server-side position).
@@ -422,7 +782,8 @@ namespace Garage.Server
         {
             if (p == null || RateLimited(int.Parse(p.Handle))) return;
             string plate;
-            int entity = OwnedVehicle(p, netId, out plate);
+            VehicleRef vehicle;
+            int entity = UsableVehicle(p, netId, out plate, out vehicle);
             if (entity == 0) { Say(p, "You don't have the keys to that vehicle."); return; }
 
             // Only the person sitting in that vehicle can work its engine.
@@ -465,16 +826,20 @@ namespace Garage.Server
             string plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
             if (plate.Length == 0) { Say(p, "That vehicle has no plate."); return; }
 
-            Query("SELECT owner, model, state, stolen FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
+            Query("SELECT id, owner, model, state, stolen FROM player_vehicles WHERE plate = ?", new object[] { plate }, rows =>
             {
                 if (rows.Count == 0) { Say(p, "That vehicle is not registered."); return; }
 
                 var row = rows[0];
+                int vehicleId = Convert.ToInt32(row["id"]);
                 string owner = row["owner"].ToString();
                 string model = row["model"].ToString();
 
                 if (Convert.ToInt32(row["state"]) == 1) { Say(p, "That vehicle is stored in a garage."); return; }
                 if (owner == license) { Say(p, "That is your own vehicle."); return; }
+                // A key holder is not a thief: hotwiring a car you were given access to would
+                // flag it stolen for its owner and burn a lockpick for nothing.
+                if (HasKey(vehicleId, license)) { Say(p, "You already have the keys to that vehicle."); return; }
                 if (Convert.ToInt32(row["stolen"]) == 1) { Say(p, "That vehicle is already reported stolen."); return; }
 
                 foreach (var other in Players.ToList())
@@ -555,10 +920,14 @@ namespace Garage.Server
             return null;
         }
 
-        // Resolves a client-supplied network id to a real vehicle entity owned (taken out) by this player.
-        int OwnedVehicle(Player p, int netId, out string plate)
+        // Resolves a client-supplied network id to a real vehicle and applies the key ACL: the
+        // owner always has access; a grantee has it only while the grant is in the cache. Because
+        // the cache is updated on revoke, a key stops working on the very next lock/engine action,
+        // even if the car is already out and moving.
+        int UsableVehicle(Player p, int netId, out string plate, out VehicleRef vehicle)
         {
             plate = null;
+            vehicle = null;
             string license = License(p);
             if (license == null) return 0;
 
@@ -566,17 +935,29 @@ namespace Garage.Server
             if (entity == 0 || !DoesEntityExist(entity)) return 0;
 
             plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
-            return Track(license).Contains(plate) ? entity : 0;
+            if (!_vehicles.TryGetValue(plate, out vehicle)) return 0;
+            if (vehicle.Owner != license && !HasKey(vehicle.Id, license)) return 0;
+            return entity;
         }
 
-        // Where are my vehicles? Positions are read from the real entities on the server.
+        // Where are my vehicles (and the ones shared with me)? Positions are read from the real
+        // entities on the server; a shared car only appears while it is actually out.
         void Locate(Player p, List<object> args)
         {
             string license = License(p);
             if (license == null) return;
 
+            var plates = new HashSet<string>();
+            if (_out.TryGetValue(license, out var own)) plates.UnionWith(own);
+            foreach (var pair in _vehicles)
+            {
+                if (!_grants.TryGetValue(pair.Value.Id, out var set) || !set.Contains(license)) continue;
+                if (_out.TryGetValue(pair.Value.Owner, out var ownerPlates) && ownerPlates.Contains(pair.Key))
+                    plates.Add(pair.Key);
+            }
+
             var entries = new List<string>();
-            foreach (var plate in Track(license))
+            foreach (var plate in plates)
             {
                 int netId;
                 if (!_netIds.TryGetValue(plate, out netId)) continue;
@@ -587,7 +968,7 @@ namespace Garage.Server
                 entries.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1:F1},{2:F1},{3:F1}", plate, pos.X, pos.Y, pos.Z));
             }
 
-            if (entries.Count == 0) { Say(p, "None of your vehicles are out in the world (see /garage)."); return; }
+            if (entries.Count == 0) { Say(p, "None of your vehicles (or shared ones) are out in the world."); return; }
             TriggerClientEvent(p, "garage:locate", string.Join(";", entries));
         }
 
@@ -596,6 +977,7 @@ namespace Garage.Server
             _netIds.Remove(plate);
             _locked.Remove(plate);
             _engineOff.Remove(plate);
+            _heldBy.Remove(plate);
         }
 
         /// <summary>
@@ -612,9 +994,9 @@ namespace Garage.Server
             {
                 int entity = NetworkGetEntityFromNetworkId(netId);
                 if (entity != 0 && DoesEntityExist(entity)) DeleteEntity(entity);
-                ForgetVehicle(plate);
             }
 
+            ForgetVehicle(plate);
             foreach (var set in _out.Values) set.Remove(plate);
 
             Debug.WriteLine($"[garage] impounded [{plate}] removed from the world");
@@ -655,16 +1037,24 @@ namespace Garage.Server
                         return;
                     }
 
-                    Query("SELECT model, plate, engine, body, mods FROM player_vehicles WHERE plate = ? AND owner = ?",
+                    Query("SELECT id, model, plate, engine, body, mods FROM player_vehicles WHERE plate = ? AND owner = ?",
                         new object[] { plate, license }, rows =>
                         {
                             if (rows.Count != 1) return;
                             var v = rows[0];
+                            int id = Convert.ToInt32(v["id"]);
+                            string model = v["model"].ToString();
+
+                            var reference = new VehicleRef { Id = id, Owner = license, Model = model };
+                            _vehicles[plate] = reference;
+                            _vehiclesById[id] = reference;
+
                             Track(license).Add(plate);
-                            TriggerClientEvent(p, "garage:spawn", v["model"].ToString(), plate,
+                            _heldBy[plate] = license;
+                            TriggerClientEvent(p, "garage:spawn", model, plate,
                                 Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]),
                                 v["mods"] == null ? "" : v["mods"].ToString());
-                            Debug.WriteLine($"[garage] delivered [{plate}] to {license}");
+                            Debug.WriteLine($"[garage] delivered #{id} [{plate}] to {license}");
                         });
                 });
 
@@ -683,22 +1073,35 @@ namespace Garage.Server
             if (entity == 0 || !DoesEntityExist(entity)) { Say(p, "No vehicle found."); return; }
 
             string plate = (GetVehicleNumberPlateText(entity) ?? "").Trim();
-            if (!Track(license).Contains(plate)) { Say(p, "That is not one of your vehicles."); return; }
+            if (!_vehicles.TryGetValue(plate, out var vehicle))
+            {
+                Say(p, "That is not one of your vehicles.");
+                return;
+            }
+
+            bool owner = vehicle.Owner == license;
+            if (!owner && !HasKey(vehicle.Id, license))
+            {
+                Say(p, "That is not one of your vehicles.");
+                return;
+            }
 
             engine = Clamp(engine); body = Clamp(body);
-            Db("UPDATE player_vehicles SET state = 1, engine = ?, body = ? WHERE plate = ? AND owner = ? AND state = 0 AND stolen = 0",
-               new object[] { engine, body, plate, license }, affected =>
+            Db("UPDATE player_vehicles SET state = 1, engine = ?, body = ? WHERE id = ? AND state = 0 AND stolen = 0",
+               new object[] { engine, body, vehicle.Id }, affected =>
                {
                    if (affected != 1)
                    {
                        Say(p, "Could not store that vehicle (a stolen vehicle has to be recovered by the police).");
                        return;
                    }
-                   Track(license).Remove(plate);
+
+                   // Parking always returns the car to its owner's garage, whichever key was used.
+                   Track(vehicle.Owner).Remove(plate);
                    ForgetVehicle(plate);
                    if (DoesEntityExist(entity)) DeleteEntity(entity);
-                   Say(p, $"[{plate}] stored in your garage.");
-                   Debug.WriteLine($"[garage] {p.Name} parked [{plate}] (engine {engine}, body {body})");
+                   Say(p, owner ? $"[{plate}] stored in your garage." : $"[{plate}] returned to its owner's garage.");
+                   Debug.WriteLine($"[garage] {p.Name} ({license}) parked {vehicle.Owner}'s [{plate}] (engine {engine}, body {body})");
                });
         }
 
@@ -711,16 +1114,28 @@ namespace Garage.Server
             _lastUse.Remove(int.Parse(p.Handle));
             _hotwires.Remove(license);
 
-            // A player who leaves with cars out must not leave them marked "out" forever.
-            if (_out.TryGetValue(license, out var plates))
+            // Return only the cars this player actually has out. A shared car being used by
+            // someone else stays in the world if the owner disconnects, and vice versa: a key
+            // holder who leaves with the car puts it back in the owner's garage.
+            var returning = new List<string>();
+            foreach (var plate in _out.Values.SelectMany(set => set).Distinct().ToList())
             {
-                foreach (var plate in plates)
-                {
-                    ForgetVehicle(plate);
-                    Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE plate = ? AND owner = ?", new object[] { plate, license }, _ => { });
-                }
-                _out.Remove(license);
+                if (_heldBy.TryGetValue(plate, out string holder) && holder != license) continue;
+                returning.Add(plate);
             }
+
+            foreach (string plate in returning)
+            {
+                string owner = _vehicles.TryGetValue(plate, out var vehicle) ? vehicle.Owner : license;
+                Db("UPDATE player_vehicles SET state = 1, stolen = 0 WHERE plate = ? AND owner = ?",
+                    new object[] { plate, owner }, _ => { });
+                Track(owner).Remove(plate);
+                ForgetVehicle(plate);
+            }
+
+            // Keep the owner's set if a key holder is still out with one of their cars.
+            foreach (string key in _out.Where(pair => pair.Value.Count == 0).Select(pair => pair.Key).ToList())
+                _out.Remove(key);
         }
 
         // ---------- helpers ----------

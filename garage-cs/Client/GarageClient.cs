@@ -31,7 +31,7 @@ namespace Garage.Client
             RegisterCommand("park", new Action<int, List<object>, string>((s, a, r) => Park()), false);
 
             RegisterCommand("lock", new Action<int, List<object>, string>((s, a, r) => ToggleLock()), false);
-            RegisterKeyMapping("lock", "Lock / unlock nearest owned vehicle", "keyboard", "L");
+            RegisterKeyMapping("lock", "Lock / unlock nearest vehicle you have keys to", "keyboard", "L");
 
             RegisterCommand("engine", new Action<int, List<object>, string>((s, a, r) => ToggleEngine()), false);
             RegisterKeyMapping("engine", "Engine on / off", "keyboard", "K");

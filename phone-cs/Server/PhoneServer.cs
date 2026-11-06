@@ -218,6 +218,57 @@ namespace Phone.Server
         }
 
         // ==================================================================
+        //  Emergency calls (handled by dispatch-cs when it is running)
+        // ==================================================================
+
+        [EventHandler("phone:emergency")]
+        void OnEmergency([FromSource] Player p, string category, string body)
+        {
+            if (!Gate(p)) return;
+
+            category = (category ?? "").Trim().ToLowerInvariant();
+            if (category != "police" && category != "medical") return;
+
+            body = Clean(body, 160);
+            if (body.Length < 4) { Say(p, "Describe the emergency first."); return; }
+
+            bool ok = false;
+            try
+            {
+                // Server-only export. Dispatch reads the caller's real position itself.
+                ok = (bool)Exports["dispatch-cs"].createCall(int.Parse(p.Handle), category, body);
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("[phone] dispatch-cs unavailable: " + e.Message);
+                Say(p, "Dispatch is unavailable right now.");
+            }
+
+            TriggerClientEvent(p, "phone:push",
+                "{\"type\":\"emergency\",\"ok\":" + (ok ? "true" : "false") + ",\"state\":\"placed\"}", false);
+        }
+
+        [EventHandler("phone:emergencyCancel")]
+        void OnEmergencyCancel([FromSource] Player p)
+        {
+            if (!Gate(p)) return;
+
+            bool ok = false;
+            try
+            {
+                ok = (bool)Exports["dispatch-cs"].cancelCall(int.Parse(p.Handle));
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine("[phone] dispatch-cs unavailable: " + e.Message);
+                Say(p, "Dispatch is unavailable right now.");
+            }
+
+            TriggerClientEvent(p, "phone:push",
+                "{\"type\":\"emergency\",\"ok\":" + (ok ? "true" : "false") + ",\"state\":\"cancelled\"}", false);
+        }
+
+        // ==================================================================
         //  Phone banking
         // ==================================================================
 

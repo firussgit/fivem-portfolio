@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Phone in C#: number per player, contacts, text messages and phone banking over MySQL, NUI interface'
-version '0.1.0'
+description 'Phone in C#: number per player, contacts, text messages, phone banking and 911/912 emergency calls over MySQL, NUI interface'
+version '0.2.0'
 
 dependencies {
     'oxmysql',

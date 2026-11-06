@@ -2,7 +2,7 @@
 
 A set of connected FiveM (GTA V) server resources written in **C#** (plus a little **Lua** and
 **JavaScript**): banking, garage, vehicle customisation, fuel, inventory, shops, jobs, needs,
-a phone and an admin tool. Each folder is a self-contained resource you can drop into `resources/`,
+a phone, a dispatch radio and an admin tool. Each folder is a self-contained resource you can drop into `resources/`,
 and together they behave like a small roleplay server.
 
 The common thread is one rule: **the client is never trusted.** The UI and the game client only
@@ -29,10 +29,11 @@ and answers with the new truth.
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
+| [`dispatch-cs`](dispatch-cs) | C# + MySQL + NUI | Dispatch radio: 911/912 calls, on-duty police/EMS claims, server-validated scene positions |
 | [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
-| [`jobs-cs`](jobs-cs) | C# + MySQL | Jobs, grades, duty and paychecks paid through a bank export |
+| [`jobs-cs`](jobs-cs) | C# + MySQL + NUI | Jobs, grades, duty, paychecks, courier and taxi activities |
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/relog`, `/car` dev commands |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
@@ -63,9 +64,14 @@ and answers with the new truth.
 - **Exports** (server-side only, so clients can't call them): `bank-cs` exposes `addMoney`,
   `removeMoney`, `addBank`, `getBalances`; `inventory-cs` exposes `addItem`, `removeItem`,
   `hasItem`, `getCount`, `canAdd`; `jobs-cs` exposes `getJob`, `getGrade`, `isOnDuty`;
-  `needs-cs` exposes `getNeeds`, `addNeeds`.
+  `needs-cs` exposes `getNeeds`, `addNeeds`; `dispatch-cs` exposes `createCall`, `cancelCall`.
 - **Events:** `inventory-cs` raises `inventory:itemUsed` (needs-cs reacts to it);
-  `garage-cs` raises `garage:vehicleSpawned` on the client (customs-cs reacts to it).
+  `garage-cs` raises `garage:vehicleSpawned` on the client (customs-cs reacts to it);
+  `jobs-cs` raises `jobs:dutyChanged` and `jobs:jobChanged` on the server
+  (dispatch-cs releases the unit's calls when they stop being eligible).
+- **Dispatch:** `phone-cs` creates 911/912 calls through dispatch-cs' server-only `createCall`
+  export. Dispatch asks `jobs-cs` who is on duty, offers the call only to the matching
+  department, and pays a resolved call through `bank-cs`.
 - Resources degrade gracefully: without `jobs-cs` there's just no mechanic discount; without
   `bank-cs` a purchase aborts before anything changes.
 
@@ -74,13 +80,15 @@ and answers with the new truth.
 | Principle | Where you can see it |
 |---|---|
 | **Server-authoritative state.** Balances, stock, fuel, inventories and vehicle state live on the server; the client renders what it's told. | every resource |
-| **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump" can't be faked. | bank, shops, customs, fuel, inventory (give nearby) |
-| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory |
+| **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch |
+| **Anti-teleport checks.** A job stop or a dispatch "on scene" only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch |
+| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim |
 | **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone |
 | **Strict input validation and rate limiting.** Bounds, lengths, formats, whitelists, per-player cooldowns. | every resource |
 | **Coalesced, ordered database writes.** Dirty tracking plus a timer instead of a write per click. | inventory, fuel, needs |
 | **Loose coupling.** Resources talk through exports and events and keep working when a dependency is missing. | needs, customs, jobs |
-| **NUI holds no authority.** The page renders state and posts intent through callbacks; user text is rendered with `textContent`. | bank, inventory, shops, customs, phone |
+| **Shared code, no runtime coupling.** One server base class provides licence lookup, chat, oxmysql and rate limits; it is compiled into each resource rather than deployed as a shared DLL. | `shared/Server/PortfolioScript.cs` |
+| **NUI holds no authority.** The page renders state and posts intent through callbacks; user text is rendered with `textContent`. | bank, inventory, shops, customs, phone, jobs |
 
 ## Quick start
 
@@ -106,8 +114,6 @@ It builds each C# resource, stops on the first failed build, and copies the resu
 
 ```powershell
 ./setup.ps1 -ResourcesPath C:\path\to\server-data\resources
-esources
-esources
 ```
 
 **4. Configure the server.** Copy [`server.cfg.example`](server.cfg.example) to your server folder as
@@ -133,23 +139,32 @@ so edit the `$dest` line at the top if your layout differs, then `restart garage
 
 ```cfg
 set jobs_pay_interval_minutes 15      # how often paychecks are paid (jobs-cs)
+set jobs_require_vehicle 1            # courier/taxi runs need a vehicle (0 = allow on foot)
 set needs_tick_seconds 60             # how often hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # how often shop stock refills (shops-cs)
+set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)
+set dispatch_scene_radius 40          # metres: how close a unit must be to mark on scene / resolve
+set dispatch_call_ttl_minutes 15      # calls left open this long expire
+set dispatch_call_cooldown_seconds 20 # minimum gap between a player's 911 calls
 set admin_bootstrap_license "xxxxxxxx"   # first SuperAdmin (admin-cs); keep it out of git
 ```
 
-Placement commands (`/setshop`, `/setcustoms`, `/setfuel`, `/atmscan`) and the dev commands check
-ACE permissions, so you decide who gets them. On a real server, give them to a staff group instead of everyone:
+Placement commands (`/setshop`, `/setcustoms`, `/setfuel`, `/setworkhub`, `/atmscan`) and the dev
+commands check ACE permissions, so you decide who gets them. On a real server, give them to a staff
+group instead of everyone:
 
 ```cfg
 add_ace group.admin garage.admin allow
 add_ace group.admin jobs.admin allow
+add_ace group.admin spawn.admin allow
 add_ace group.admin bank.admin allow
 add_ace group.admin inventory.admin allow
 add_ace group.admin shops.admin allow
 add_ace group.admin needs.admin allow
 add_ace group.admin customs.admin allow
 add_ace group.admin fuel.admin allow
+add_ace group.admin dispatch.admin allow
+add_ace group.admin dispatch.test allow
 add_principal identifier.license:xxxxxxxx group.admin
 ```
 
@@ -181,9 +196,16 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/job` | jobs-cs | Shows your job, grade, salary and duty state | `/job` |
 | `/duty` | jobs-cs | Toggles duty (you only get paychecks on duty) | `/duty` |
 | `/quitjob` | jobs-cs | Become unemployed | `/quitjob` |
+| `/work` | jobs-cs | Starts the activity for your job (courier deliveries or taxi fares); must be on duty at the hub | `/work` |
+| `/work stop` | jobs-cs | Cancels the run you are on | `/work stop` |
+| `/work stats` | jobs-cs | Shows completed runs and total earnings | `/work stats` |
 | `/inventory` | inventory-cs | Opens the inventory (key **I**) | `/inventory` |
 | `/phone` | phone-cs | Opens the phone (key **F1**) | `/phone` |
-| `/car [model]` | spawn-core | Dev helper: spawns a vehicle and seats you in it | `/car sultan` |
+| `/911 <message>` | dispatch-cs | Calls police dispatch (the phone's Emergency tab does the same) | `/911 Help at Legion Square` |
+| `/912 <message>` | dispatch-cs | Calls medical dispatch | `/912 Cyclist down on the beach` |
+| `/cancelcall` | dispatch-cs | Cancels your active call | `/cancelcall` |
+| `/dispatch` | dispatch-cs | Opens / closes the dispatch console (key **F2**) | `/dispatch` |
+| `/car [model]` | spawn-core | Dev helper: spawns a vehicle and seats you in it (requires `spawn.admin`) | `/car sultan` |
 | `/uifix` | bank-cs | Releases the mouse cursor if a UI ever leaves it stuck | `/uifix` |
 
 ### Staff commands (admin-cs roles)
@@ -209,12 +231,15 @@ Roles rank `none < mod < admin < superadmin`. You can only act on someone rankin
 |---|---|---|---|
 | `/givecar <model>` | `garage.admin` | Adds a vehicle to your garage. Models: adder, sultan, buffalo, comet2, kuruma, faggio, bati, sandking, stanier, baller | `/givecar comet2` |
 | `/giveitem <id> <item> [count]` | `inventory.admin` | Gives an item. Items: water, sandwich, bandage, lockpick, repair_kit, radio | `/giveitem 1 sandwich 3` |
-| `/setjob <id> <job> [grade]` | `jobs.admin` | Sets a job. Jobs: unemployed, police, ems, mechanic, taxi | `/setjob 1 mechanic 1` |
+| `/setjob <id> <job> [grade]` | `jobs.admin` | Sets a job. Jobs: unemployed, courier, police, ems, mechanic, taxi | `/setjob 1 mechanic 1` |
+| `/setworkhub <courier\|taxi>` | `jobs.admin` | Moves a job activity start point (hub) to where you stand | `/setworkhub courier` |
 | `/setneeds <hunger> <thirst>` | `needs.admin` | Sets your own hunger and thirst (0-100) | `/setneeds 20 10` |
 | `/setshop <general\|hardware>` | `shops.admin` | Places a shop where you stand | `/setshop general` |
 | `/setcustoms` | `customs.admin` | Places a customs bay where you stand | `/setcustoms` |
 | `/setfuel` | `fuel.admin` | Places a fuel station where you stand | `/setfuel` |
 | `/atmscan` | `bank.admin` | Registers ATM props near you as valid ATM locations | `/atmscan` |
+| `/dispatchtest <police\|medical> [message]` | `dispatch.test` | Creates a test call at your position (useful for a solo dispatch test) | `/dispatchtest police Robbery in progress` |
+| `/dispatchclose <call id>` | `dispatch.admin` / `dispatch.test` | Force-closes an active call | `/dispatchclose 12` |
 | `/atmdebug` | none | Prints the ATMs the client can currently see | `/atmdebug` |
 
 ### Keybinds
@@ -224,6 +249,7 @@ Roles rank `none < mod < admin < superadmin`. You can only act on someone rankin
 | **E** | Interact: use an ATM, open a shop, enter a customs bay, refuel (the prompt shows when it applies) |
 | **I** | Inventory |
 | **F1** | Phone |
+| **F2** | Dispatch console |
 | **L** | Lock / unlock vehicle |
 | **K** | Engine on / off |
 | **Tab** (in chat) | Complete the command you're typing; press again to cycle matches |
@@ -239,9 +265,11 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 4. **Fuel.** Stand at a pump and run `/setfuel`. Watch the `FUEL %` gauge drop while driving, then pull up to the pump and press **E**. The fuel level survives `/park` and `/takeout`.
 5. **Customs.** Run `/setcustoms` in a garage forecourt, drive in and press **E**. Move the sliders (the car changes live, the price comes from the server), then **Buy & save**. Park and take the car out: the mods are still there.
 6. **Jobs.** `/setjob <your id> mechanic 1`, `/duty`, wait for a paycheck, then open customs again: you now get a 20% discount.
-7. **Items.** Place a shop with `/setshop general`, buy water and a sandwich, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
-8. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-9. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+7. **A shift.** `/setjob <your id> courier 0` (or `taxi 0`), `/duty`, drive to the Go Postal / cab hub marked on the map and run `/work`. Follow the GPS stop to stop; the HUD shows the timer, distance and payout. Finish at the last stop to get paid in cash, then try `/work stats`.
+8. **Dispatch.** `/setjob <your id> police 0`, `/duty`, then press **F2** to open the dispatch console. Normally a civilian dials 911 or 912 from the phone's Emergency tab; for a solo test run `/dispatchtest police Robbery in progress` to place a call at your feet. Claim it, mark **En route**, mark **On scene**, then close it as **Resolved**: $150 is paid to your bank. `/dispatchtest medical ...` proves the medical queue is separate.
+9. **Items.** Place a shop with `/setshop general`, buy water and a sandwich, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
+10. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+11. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -357,10 +385,46 @@ A phone with its own number, contacts, texting and phone banking, backed by MySQ
   an offline one finds it on their next open.
 - **Phone banking.** Pay an online player by number: the amount is taken from the sender with the
   bank's atomic check-and-deduct and credited to the receiver, with a refund if the credit fails.
+- **Emergency calls.** The Emergency tab dials 911 (police) or 912 (medical). The phone passes only the
+  text to `dispatch-cs`; dispatch reads the caller's position itself, so the call can't point somewhere else.
 - Contacts can only be deleted by their owner (`DELETE ... WHERE id = ? AND owner = ?`). User text is
   rendered with `textContent`, never as HTML.
 
 Open with **F1** or `/phone`. Requires `oxmysql` and `bank-cs`.
+
+### dispatch-cs
+
+A dispatch radio that turns a 911 call into a claimable, server-validated job for police and EMS.
+
+- **The call is created by the server.** A civilian dials 911/912 from the phone's Emergency tab (or uses
+  `/911` / `/912`). `phone-cs` calls dispatch's server-only `createCall` export; the client never sends
+  a location. Dispatch reads the caller's OneSync position, maps it to the nearest named district and
+  stores the call in `dispatch_calls`.
+- **Only the right department sees it.** Every broadcast asks `jobs-cs` `isOnDuty(src, job)`, so a call
+  is offered only to on-duty police (police calls) or EMS (medical calls). `dispatch.admin` can see both
+  queues. Going off duty, changing job or disconnecting releases that unit's calls.
+- **Claiming is atomic.** `UPDATE ... WHERE id = ? AND status = 'open'` means two units racing for the
+  same call cannot both win; the loser is told it was taken.
+- **Positions are checked on the server.** "On scene" requires the server's position to be within
+  `dispatch_scene_radius` (40 m) of the call, and the time since the claim must be enough for a vehicle
+  to cover the distance (65 m/s cap, 2 s grace). "Resolved" requires the same presence check, so a
+  modified client cannot close calls from across the map. No partial state changes: the database row
+  is only moved forward after the check passes.
+- **A complete lifecycle.** `open → claimed → enroute → onscene → closed`, with outcomes
+  `resolved`, `false_alarm`, `no_response`, `cancelled` (caller) or `expired` (TTL). Active calls live
+  in memory; every call is a row in `dispatch_calls`.
+- **Pay through the bank.** A resolved call pays `dispatch_pay_per_call` (default $150) to the unit's
+  bank through `bank-cs`' server-only `addBank`. If the bank is unavailable the row's payout is set to 0
+  and the unit is told, so the database never claims money that was not paid.
+- **Console.** Press **F2** or `/dispatch`: a focused NUI panel lists the calls the player may see, with
+  age, distance, caller, status, and only the actions that are valid for that call. Claiming sets a GPS
+  route and a blip that is cleared on release or close. The page renders with `textContent` only.
+- **Test hook.** `/dispatchtest <police|medical> [message]` (ACE `dispatch.test`) places a synthetic
+  call at your feet, so one client can exercise the whole flow; `/dispatchclose <id>` force-closes one.
+
+Requires `oxmysql`, `jobs-cs`, OneSync and `bank-cs` for payouts. `phone-cs` is optional: without it
+calls still work through `/911` and `/912`. Convars: `dispatch_pay_per_call`, `dispatch_scene_radius`,
+`dispatch_call_ttl_minutes`, `dispatch_call_cooldown_seconds`.
 
 ### needs-cs
 
@@ -430,21 +494,37 @@ Requires `oxmysql`.
 
 ### jobs-cs
 
-Jobs with grades, a duty toggle and automatic paychecks, built to cooperate with the bank.
+Jobs with grades, a duty toggle, automatic paychecks and repeatable activities, built to cooperate with the bank.
 
 - **Cross-resource integration.** Paychecks are paid with `exports['bank-cs']:addBank(...)`.
   It's a *server* export, so a client can't call it to give itself money, and the bank
   re-validates the amount and the player on every call instead of trusting the caller.
 - **Definitions in code, state in the database.** The DB stores only `job` and `grade`;
-  labels and salaries come from the server-side definitions, so changing a salary needs no
-  migration, and a job removed from the config falls back to unemployed instead of crashing.
+  labels, salaries and activity routes come from the server-side definitions, so changing a
+  salary needs no migration, and a job removed from the config falls back to unemployed instead of crashing.
 - **Pay only while on duty.** `/duty` toggles it; duty resets on disconnect, on server restart
-  and whenever a job changes, so nobody is paid for a role they no longer hold.
+  and whenever a job changes, so nobody is paid for a role they no longer hold. Going off duty
+  also cancels an active run.
+- **Activities that cannot be faked.** `/work` starts the run for your job (courier deliveries
+  or taxi fares) when you are on duty and standing at that job's hub. The client only draws the
+  blips, marker and HUD and says "I reached this stop"; the server re-reads the real position
+  (OneSync), requires a vehicle, rejects stops that are out of range, and rejects a claim that
+  covered the distance faster than a vehicle can (65 m/s), so teleporting onto a marker does not
+  complete the run. A server-side timer expires a run that takes too long.
+- **Server-owned payout.** Completion pay is calculated from the route distance, a per-activity
+  rate and the player's grade, then paid in cash through bank-cs' server-only `addMoney`.
+  `/work stop` cancels the run and `/work stats` reads the player's completed-run totals.
+- **Hubs placed in-game.** `/setworkhub <courier|taxi>` moves a start point to where an admin is
+  standing and saves it to `workhubs.txt`, so no coordinates have to be typed by hand.
+- **History, not live state.** Active runs live in memory because they belong to a session; every
+  completed, cancelled, expired or abandoned run is appended to `job_runs` with its route, seconds,
+  payout and status.
 - **Exports for other resources:** `getJob`, `getGrade`, `isOnDuty(src, job)`
   (synchronous, served from a per-player cache that lives only while they're online).
 
-Jobs and grades: police (Cadet, Officer, Sergeant), ems (Trainee, Paramedic, Chief),
-mechanic (Apprentice, Mechanic), taxi (Driver), unemployed. Requires `oxmysql` and `bank-cs`.
+Jobs and grades: courier (Courier, Senior Courier), police (Cadet, Officer, Sergeant),
+ems (Trainee, Paramedic, Chief), mechanic (Apprentice, Mechanic), taxi (Driver), unemployed.
+Requires `oxmysql`, `bank-cs` and OneSync. Set `jobs_require_vehicle 0` to allow activities on foot.
 
 ### admin-cs
 
@@ -467,11 +547,14 @@ Requires `oxmysql` and OneSync.
 
 ### spawn-core
 
-- The client reports its position every 5 s; the server validates the payload and stores
-  it per license (flushed every minute and on disconnect).
-- On spawn the client asks for it and teleports there, waiting for map collision to load
-  first so the player doesn't fall through the world.
-- `/car [model]` spawns a validated vehicle and seats you in it (deletes the previous one).
+- The client reports its position every 5 s; the server rejects malformed values and anything
+  outside the map, and compares the report with the player's real position (OneSync) — if they
+  disagree by more than a few metres, the server's position is the one it keeps. Positions are
+  stored per license and flushed every minute and on disconnect.
+- On spawn the client asks for the saved position and teleports there, waiting for map collision
+  to load first so the player doesn't fall through the world.
+- `/car [model]` is ACE-gated (`spawn.admin`). The client asks the server; only an authorised
+  player gets the event back that spawns a validated vehicle and seats them in it.
 - `/relog` saves your position and has the server drop you back to the FiveM menu. Scripts
   can't run `connect` or `disconnect` (both are disabled in production mode), so the server does it.
 
@@ -487,6 +570,10 @@ Developed and tested against a local FiveM server (artifact 35245). C# resources
 .NET Framework 4.5.2 via the `CitizenFX.Core` NuGet packages, and each one builds with
 `dotnet build` through its `deploy.ps1`. The `*-dev` ACEs in a local `server.cfg` are for testing
 only; on a real server, grant them to staff groups as shown in the quick start.
+
+The server-side helpers used by `jobs-cs` and `dispatch-cs` live in [`shared/Server/PortfolioScript.cs`](shared/Server/PortfolioScript.cs)
+and are linked into the resource at compile time, so adopting them needs no extra assembly or
+runtime dependency. A GitHub Actions workflow builds every resource with `setup.ps1` on each push.
 
 ## License
 

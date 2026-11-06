@@ -17,7 +17,7 @@ namespace Phone.Client
         public PhoneClient()
         {
             // Each callback the page calls must be registered, or the request is silently dropped.
-            foreach (var name in new[] { "close", "addContact", "deleteContact", "send", "markRead", "pay" }) RegisterNuiCallbackType(name);
+            foreach (var name in new[] { "close", "addContact", "deleteContact", "send", "markRead", "pay", "emergency", "emergencyCancel" }) RegisterNuiCallbackType(name);
 
             Nui("close", d => Close());
             Nui("addContact", d => TriggerServerEvent("phone:addContact", Str(d, "name"), Str(d, "number")));
@@ -25,6 +25,8 @@ namespace Phone.Client
             Nui("send", d => TriggerServerEvent("phone:send", Str(d, "to"), Str(d, "body")));
             Nui("markRead", d => TriggerServerEvent("phone:markRead", Str(d, "from")));
             Nui("pay", d => TriggerServerEvent("phone:pay", Str(d, "to"), Convert.ToInt32(d["amount"])));
+            Nui("emergency", d => TriggerServerEvent("phone:emergency", Str(d, "category"), Str(d, "body")));
+            Nui("emergencyCancel", d => TriggerServerEvent("phone:emergencyCancel"));
 
             EventHandlers["phone:state"] += new Action<string>(json => SendNuiMessage(json));
             EventHandlers["phone:push"] += new Action<string, bool>(OnPush);

@@ -66,6 +66,22 @@ input {
 }
 input:focus { outline: 1px solid var(--accent); }
 
+textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: none;
+  padding: 10px 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  user-select: text;
+}
+textarea:focus { outline: 1px solid var(--accent); }
+
 form { display: flex; gap: 6px; margin-top: 8px; }
 form button {
   padding: 0 14px;
@@ -125,3 +141,34 @@ nav button {
 }
 nav button.active { color: var(--accent); }
 #badge { position: absolute; top: 6px; right: 14px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #ff5b5b; color: #fff; font-size: 10px; line-height: 16px; }
+
+/* ---------- emergency ---------- */
+
+.emg { display: flex; flex-direction: column; gap: 9px; padding: 10px 2px 0; }
+.emg h2 { margin: 0 0 2px; font-size: 17px; font-weight: 600; }
+.emg .hint { margin: 0; text-align: left; line-height: 1.4; }
+.emgBtn {
+  padding: 13px 12px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+.emgBtn:hover { filter: brightness(1.08); }
+.emgBtn.police { background: #2f6fd0; }
+.emgBtn.medical { background: #b23a3a; }
+.ghostBtn {
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ghostBtn:hover { color: var(--text); border-color: var(--muted); }

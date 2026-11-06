@@ -1,0 +1,26 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # setup.ps1 builds every C# resource and copies the Lua/JS resources, exactly like a
+      # local install. A failed build stops the script, so CI fails on any broken resource.
+      - name: Build every resource
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\resources" | Out-Null
+          ./setup.ps1 -ResourcesPath "$env:RUNNER_TEMP\resources"

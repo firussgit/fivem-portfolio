@@ -8,3 +8,19 @@ CREATE TABLE IF NOT EXISTS player_jobs (
     on_duty    TINYINT     NOT NULL DEFAULT 0,
     updated_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- Append-only history of courier/taxi runs. Payouts are calculated on the server at the
+-- moment a run is completed; cancelled, expired and abandoned runs are logged with 0.
+CREATE TABLE IF NOT EXISTS job_runs (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    license    VARCHAR(64) NOT NULL,
+    job        VARCHAR(32) NOT NULL,
+    activity   VARCHAR(32) NOT NULL,
+    route      VARCHAR(64) NOT NULL,
+    stops      INT         NOT NULL,
+    payout     INT         NOT NULL,
+    seconds    INT         NOT NULL,
+    status     VARCHAR(16) NOT NULL,   -- completed, cancelled, expired, abandoned
+    created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_license (license)
+);

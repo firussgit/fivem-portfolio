@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Job Activity</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section id="hud" class="hidden">
+    <div class="accent"></div>
+    <div class="inner">
+      <div class="top">
+        <span class="kicker">ACTIVE WORK</span>
+        <span id="timer">0:00</span>
+      </div>
+      <h1 id="label">Work</h1>
+      <p id="objective" class="objective">&mdash;</p>
+      <p id="status" class="status">&mdash;</p>
+      <div class="bar"><span id="progress"></span></div>
+      <div class="meta">
+        <span id="step">Stop 1/1</span>
+        <span id="payout">$0</span>
+      </div>
+      <div class="distance"><span class="dot"></span><span id="distance">&mdash;</span></div>
+    </div>
+  </section>
+
+  <section id="summary" class="hidden">
+    <span id="summaryTitle">JOB COMPLETE</span>
+    <strong id="summaryPayout">$0</strong>
+    <p id="summaryReason"></p>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>

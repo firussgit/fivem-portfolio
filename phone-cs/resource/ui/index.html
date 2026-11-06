@@ -51,10 +51,24 @@
       <div id="payHint" class="hint">Pay anyone who is online, straight from your bank account.</div>
     </section>
 
+    <!-- Emergency: 911 (police) and 912 (medical) go to dispatch-cs -->
+    <section id="tab-emergency" class="tab hidden">
+      <div class="emg">
+        <h2>Emergency</h2>
+        <p class="hint">Dispatch sees your location automatically. Describe what is happening, then choose a service.</p>
+        <textarea id="emgBody" maxlength="160" placeholder="What is happening?" autocomplete="off"></textarea>
+        <button id="emgPolice" class="emgBtn police">Call 911 &middot; Police</button>
+        <button id="emgMedical" class="emgBtn medical">Call 912 &middot; Medical</button>
+        <button id="emgCancel" class="ghostBtn">Cancel my active call</button>
+        <p id="emgState" class="hint"></p>
+      </div>
+    </section>
+
     <nav>
       <button data-tab="messages" class="active">Messages<span id="badge" class="hidden"></span></button>
       <button data-tab="contacts">Contacts</button>
       <button data-tab="bank">Bank</button>
+      <button data-tab="emergency">Emergency</button>
     </nav>
   </main>
   <script src="script.js"></script>

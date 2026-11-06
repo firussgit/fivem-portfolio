@@ -1,0 +1,222 @@
+:root {
+  --bg: rgba(15, 19, 24, .97);
+  --panel: #181e26;
+  --line: #2a3340;
+  --text: #e8edf3;
+  --muted: #8b97a8;
+  --police: #4c8dff;
+  --medical: #ff5b5b;
+  --open: #3fb97a;
+  --claimed: #ffc14d;
+  --ontrack: #4cc3ff;
+  --danger: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+
+.hidden { display: none !important; }
+
+#panel {
+  position: fixed;
+  top: 4vh;
+  right: 3vw;
+  width: 448px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65);
+  backdrop-filter: blur(8px);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.kicker {
+  font-size: 10px;
+  letter-spacing: .18em;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+h1 {
+  margin: 2px 0 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+#closeBtn {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+#closeBtn:hover { color: var(--text); }
+
+.hint {
+  margin: 0;
+  padding: 9px 18px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.calls {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+  margin-top: 46px;
+}
+
+/* ---------- call card ---------- */
+
+.call {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--police);
+  border-radius: 12px;
+  padding: 11px 13px 12px;
+}
+.call.medical { border-left-color: var(--medical); }
+.call.mine { box-shadow: 0 0 0 1px rgba(76, 141, 255, .35) inset; }
+
+.call .top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(76, 141, 255, .16);
+  color: var(--police);
+}
+.call.medical .badge {
+  background: rgba(255, 91, 91, .16);
+  color: var(--medical);
+}
+
+.call .id { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.call .spacer { flex: 1; }
+.call .age { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.status {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  padding: 3px 6px;
+  border-radius: 5px;
+  text-transform: uppercase;
+  background: rgba(139, 151, 168, .14);
+  color: var(--muted);
+}
+.status.open { background: rgba(63, 185, 122, .15); color: var(--open); }
+.status.claimed { background: rgba(255, 193, 77, .15); color: var(--claimed); }
+.status.enroute { background: rgba(76, 195, 255, .15); color: var(--ontrack); }
+.status.onscene { background: rgba(76, 195, 255, .2); color: var(--ontrack); }
+
+.call .msg {
+  margin: 0 0 7px;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.call .loc {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.call .loc strong { color: var(--text); font-weight: 600; }
+
+.call .unit {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.call .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+button.act {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--police);
+  color: #06192e;
+}
+button.act:hover { filter: brightness(1.08); }
+button.act.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+button.act.ghost:hover { color: var(--text); border-color: var(--muted); }
+button.act.danger { background: var(--danger); color: #2b0505; }
+
+select.outcome {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #141a21;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 8px;
+  cursor: pointer;
+}
+
+footer {
+  padding: 11px 18px 13px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 16px;
+}

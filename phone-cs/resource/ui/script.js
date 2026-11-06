@@ -132,6 +132,20 @@ $('payForm').onsubmit = (e) => {
   $('payAmount').value = '';
 };
 
+// ---------- emergency ----------
+function emergency(category) {
+  const body = $('emgBody').value.trim();
+  if (body.length < 4) {
+    $('emgState').textContent = 'Describe the emergency first.';
+    return;
+  }
+  $('emgState').textContent = 'Calling dispatch\u2026';
+  post('emergency', { category, body });
+}
+$('emgPolice').onclick = () => emergency('police');
+$('emgMedical').onclick = () => emergency('medical');
+$('emgCancel').onclick = () => { $('emgState').textContent = 'Cancelling\u2026'; post('emergencyCancel'); };
+
 function close() {
   $('phone').classList.add('hidden');
   post('close');
@@ -161,6 +175,16 @@ window.addEventListener('message', ({ data }) => {
     render();
   }
   if (data.type === 'balance') $('bankBalance').textContent = money(data.bank);
+  if (data.type === 'emergency') {
+    if (data.state === 'cancelled') {
+      $('emgState').textContent = data.ok ? 'Call cancelled.' : 'You have no active call.';
+    } else {
+      $('emgState').textContent = data.ok
+        ? 'Call placed. Dispatch has your location.'
+        : 'The call could not be placed.';
+      if (data.ok) $('emgBody').value = '';
+    }
+  }
 });
 
 // Plain-browser preview (outside the game): show the phone with sample data.

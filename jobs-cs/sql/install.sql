@@ -24,3 +24,20 @@ CREATE TABLE IF NOT EXISTS job_runs (
     created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_license (license)
 );
+
+-- Append-only history of on-duty field actions: police fines and impounds, EMS revives,
+-- mechanic repairs. "amount" is the money moved (fine charged, revive/repair paid); it is 0
+-- for an impound. target_* is the player affected, or empty for an unowned target/vehicle.
+CREATE TABLE IF NOT EXISTS job_actions (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    actor_license  VARCHAR(64) NOT NULL,
+    actor_name     VARCHAR(64) NOT NULL,
+    action         VARCHAR(16) NOT NULL,   -- fine, impound, revive, repair
+    target_license VARCHAR(64) NULL,
+    target_name    VARCHAR(64) NULL,
+    amount         INT         NOT NULL DEFAULT 0,
+    detail         VARCHAR(160) NOT NULL,
+    created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_actor (actor_license),
+    INDEX idx_action (action)
+);

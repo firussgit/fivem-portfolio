@@ -26,7 +26,7 @@ namespace Jobs.Client
     /// "I reached the stop" intent. It never decides whether a stop counts - the server checks
     /// the real position (OneSync), the vehicle and the time it would take to get there.
     /// </summary>
-    public class JobsClient : BaseScript
+    public partial class JobsClient : BaseScript
     {
         const float ReachRadius = 7.5f;
         const float HudIntervalMs = 400;
@@ -56,6 +56,7 @@ namespace Jobs.Client
 
             TriggerServerEvent("jobs:requestHubs");
             _lastHubRequest = GetGameTimer();
+            SetupActions();
             Tick += OnTick;
         }
 

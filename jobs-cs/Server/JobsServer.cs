@@ -87,10 +87,11 @@ namespace Jobs.Server
 
     /// <summary>
     /// Jobs with grades, a duty toggle and periodic paychecks, plus repeatable job activities
-    /// (courier deliveries and taxi fares). Salaries and routes live in code (the server is the
-    /// only authority) and money is paid through bank-cs' server-only exports.
+    /// (courier deliveries and taxi fares) and on-duty field actions (police fines/impound,
+    /// EMS revive, mechanic repair). Salaries and routes live in code (the server is the only
+    /// authority) and money is paid through bank-cs' server-only exports.
     /// </summary>
-    public class JobsServer : PortfolioScript
+    public partial class JobsServer : PortfolioScript
     {
         // The definitions are the source of truth: the database only stores job name + grade index.
         static readonly Dictionary<string, JobDef> Jobs = new Dictionary<string, JobDef>
@@ -178,6 +179,7 @@ namespace Jobs.Server
             }));
 
             CreateTable();
+            SetupActions();
             Tick += PaycheckLoop;
             Tick += ActivityLoop;
         }
@@ -447,6 +449,8 @@ namespace Jobs.Server
                 long earned = rows.Count > 0 ? Convert.ToInt64(rows[0]["earned"]) : 0;
                 Say(p, $"Completed {runs} job(s), earned ${earned.ToString("N0", CultureInfo.InvariantCulture)} in total.");
             });
+
+            ShowActionStats(p, license);
         }
 
         void Error(Player p, string message)

@@ -40,6 +40,10 @@ namespace Garage.Server
             Cmd("garage", ListGarage);
             Cmd("takeout", TakeOut);
 
+            // Server-only: jobs-cs validates and records a police impound, then asks the garage to
+            // remove the live entity and its cache so the vehicle can be taken out again later.
+            Exports.Add("impound", new Func<string, bool>(Impound));
+
             try
             {
                 Db("CREATE TABLE IF NOT EXISTS player_vehicles (" +
@@ -258,6 +262,29 @@ namespace Garage.Server
             _netIds.Remove(plate);
             _locked.Remove(plate);
             _engineOff.Remove(plate);
+        }
+
+        /// <summary>
+        /// Removes an impounded vehicle from the world. Ownership and the player_vehicles row are
+        /// handled by the caller (jobs-cs); this clears the live entity and the in-memory tracking
+        /// so a later /takeout spawns a fresh vehicle.
+        /// </summary>
+        bool Impound(string plate)
+        {
+            plate = (plate ?? "").Trim();
+            if (plate.Length == 0) return false;
+
+            if (_netIds.TryGetValue(plate, out int netId))
+            {
+                int entity = NetworkGetEntityFromNetworkId(netId);
+                if (entity != 0 && DoesEntityExist(entity)) DeleteEntity(entity);
+                ForgetVehicle(plate);
+            }
+
+            foreach (var set in _out.Values) set.Remove(plate);
+
+            Debug.WriteLine($"[garage] impounded [{plate}] removed from the world");
+            return true;
         }
 
         [EventHandler("garage:park")]

@@ -18,6 +18,10 @@ set mysql_connection_string "mysql://root:fivem_dev_password@127.0.0.1:3307/five
 # --- optional tuning ---
 set jobs_pay_interval_minutes 15      # paychecks (jobs-cs)
 set jobs_require_vehicle 1            # courier/taxi runs need a vehicle (0 = allow on foot)
+set ems_revive_pay 200                # bank bonus for an EMS revive (0 = none)
+set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can be revived again
+set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
+set police_fine_max 2500              # largest fine a police officer can issue
 set needs_tick_seconds 60             # hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # shop restock (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)
@@ -41,8 +45,8 @@ ensure oxmysql
 # --- portfolio resources (order matters: dependencies first) ---
 ensure hello-lua
 ensure bank-cs
-ensure jobs-cs
 ensure inventory-cs
+ensure jobs-cs
 ensure needs-cs
 ensure shops-cs
 ensure garage-cs

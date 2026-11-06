@@ -1,9 +1,9 @@
 # FiveM Portfolio
 
 A set of connected FiveM (GTA V) server resources written in **C#** (plus a little **Lua** and
-**JavaScript**): banking, garage, vehicle customisation, fuel, inventory, shops, jobs, needs,
-a phone, a dispatch radio and an admin tool. Each folder is a self-contained resource you can drop into `resources/`,
-and together they behave like a small roleplay server.
+**JavaScript**): banking, garage, vehicle customisation, fuel, inventory, shops, jobs, field
+actions, needs, a phone, a dispatch radio and an admin tool. Each folder is a self-contained
+resource you can drop into `resources/`, and together they behave like a small roleplay server.
 
 The common thread is one rule: **the client is never trusted.** The UI and the game client only
 send *intent* ("buy this", "move slot 3 to 7"); the server validates everything, owns the numbers,
@@ -33,7 +33,7 @@ and answers with the new truth.
 | [`needs-cs`](needs-cs) | C# + MySQL + NUI | Hunger and thirst with server-side decay, driven by inventory events |
 | [`shops-cs`](shops-cs) | C# + MySQL + NUI | Shops with all-or-nothing purchases across the bank and inventory |
 | [`inventory-cs`](inventory-cs) | C# + MySQL + NUI | Slot/weight inventory, atomic moves and trades, drag and drop UI |
-| [`jobs-cs`](jobs-cs) | C# + MySQL + NUI | Jobs, grades, duty, paychecks, courier and taxi activities |
+| [`jobs-cs`](jobs-cs) | C# + MySQL + NUI | Jobs, grades, duty, paychecks, courier/taxi activities and police/EMS/mechanic field actions |
 | [`admin-cs`](admin-cs) | C# + MySQL | Roles, bans enforced at connect, rank checks, audit log |
 | [`spawn-core`](spawn-core) | Lua | Persistent last position across sessions, `/relog`, `/car` dev commands |
 | [`hello-lua`](hello-lua) | Lua | Client/server events and commands, the basics |
@@ -83,6 +83,7 @@ and answers with the new truth.
 | **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch |
 | **Anti-teleport checks.** A job stop or a dispatch "on scene" only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch |
 | **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim |
+| **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
 | **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone |
 | **Strict input validation and rate limiting.** Bounds, lengths, formats, whitelists, per-player cooldowns. | every resource |
 | **Coalesced, ordered database writes.** Dirty tracking plus a timer instead of a write per click. | inventory, fuel, needs |
@@ -140,6 +141,10 @@ so edit the `$dest` line at the top if your layout differs, then `restart garage
 ```cfg
 set jobs_pay_interval_minutes 15      # how often paychecks are paid (jobs-cs)
 set jobs_require_vehicle 1            # courier/taxi runs need a vehicle (0 = allow on foot)
+set ems_revive_pay 200                # bank bonus for an EMS revive (0 = none)
+set ems_revive_cooldown_seconds 60    # minimum gap before the same patient can be revived again
+set mechanic_repair_pay 250           # bank fee for a mechanic repair (consumes a repair kit)
+set police_fine_max 2500              # largest fine a police officer can issue
 set needs_tick_seconds 60             # how often hunger / thirst decay (needs-cs)
 set shops_restock_minutes 5           # how often shop stock refills (shops-cs)
 set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call (0 = none)
@@ -198,7 +203,11 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/quitjob` | jobs-cs | Become unemployed | `/quitjob` |
 | `/work` | jobs-cs | Starts the activity for your job (courier deliveries or taxi fares); must be on duty at the hub | `/work` |
 | `/work stop` | jobs-cs | Cancels the run you are on | `/work stop` |
-| `/work stats` | jobs-cs | Shows completed runs and total earnings | `/work stats` |
+| `/work stats` | jobs-cs | Shows completed runs, earnings and field-action totals | `/work stats` |
+| `/fine <id> <amount> <reason>` | jobs-cs | On-duty police: fines a nearby player from their bank | `/fine 4 500 reckless driving` |
+| `/revive <id>` | jobs-cs | On-duty EMS: revives a downed player within 4 m | `/revive 4` |
+| `/repair` | jobs-cs | On-duty mechanic: repairs the nearest vehicle (uses a repair kit) | `/repair` |
+| `/impound` | jobs-cs | On-duty police: impounds the nearest owned vehicle | `/impound` |
 | `/inventory` | inventory-cs | Opens the inventory (key **I**) | `/inventory` |
 | `/phone` | phone-cs | Opens the phone (key **F1**) | `/phone` |
 | `/911 <message>` | dispatch-cs | Calls police dispatch (the phone's Emergency tab does the same) | `/911 Help at Legion Square` |
@@ -267,9 +276,10 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 6. **Jobs.** `/setjob <your id> mechanic 1`, `/duty`, wait for a paycheck, then open customs again: you now get a 20% discount.
 7. **A shift.** `/setjob <your id> courier 0` (or `taxi 0`), `/duty`, drive to the Go Postal / cab hub marked on the map and run `/work`. Follow the GPS stop to stop; the HUD shows the timer, distance and payout. Finish at the last stop to get paid in cash, then try `/work stats`.
 8. **Dispatch.** `/setjob <your id> police 0`, `/duty`, then press **F2** to open the dispatch console. Normally a civilian dials 911 or 912 from the phone's Emergency tab; for a solo test run `/dispatchtest police Robbery in progress` to place a call at your feet. Claim it, mark **En route**, mark **On scene**, then close it as **Resolved**: $150 is paid to your bank. `/dispatchtest medical ...` proves the medical queue is separate.
-9. **Items.** Place a shop with `/setshop general`, buy water and a sandwich, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
-10. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-11. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+9. **Field actions.** As on-duty police, stand next to a player and `/fine <id> 250 speeding`; with an owned car out, stand next to it and `/impound` (it returns to `/garage`). Switch to `ems 0` and `/duty` to `/revive <id>` a downed player, or `mechanic 1` and `/duty` to `/repair` a nearby vehicle with a repair kit from a shop. Each action is written to `job_actions` and visible in `/work stats`.
+10. **Items.** Place a shop with `/setshop general`, buy water and a sandwich, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
+11. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+12. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -494,7 +504,7 @@ Requires `oxmysql`.
 
 ### jobs-cs
 
-Jobs with grades, a duty toggle, automatic paychecks and repeatable activities, built to cooperate with the bank.
+Jobs with grades, a duty toggle, automatic paychecks, repeatable activities and on-duty field actions, built to cooperate with the bank.
 
 - **Cross-resource integration.** Paychecks are paid with `exports['bank-cs']:addBank(...)`.
   It's a *server* export, so a client can't call it to give itself money, and the bank
@@ -514,6 +524,14 @@ Jobs with grades, a duty toggle, automatic paychecks and repeatable activities, 
 - **Server-owned payout.** Completion pay is calculated from the route distance, a per-activity
   rate and the player's grade, then paid in cash through bank-cs' server-only `addMoney`.
   `/work stop` cancels the run and `/work stats` reads the player's completed-run totals.
+- **Field actions while on duty.** Police `/fine` a nearby player (the bank's atomic
+  check-and-deduct makes the charge all-or-nothing) and `/impound` an owned vehicle (the row is
+  moved to stored only if it was still out, and `garage-cs` deletes the live entity). EMS
+  `/revive` reads the patient's real ped health and pays only after the patient's client
+  resurrects them and the server re-checks the result. Mechanics `/repair` consume a
+  `repair_kit` through inventory-cs and pay through bank-cs. Every action re-checks job, duty
+  and the server-side distance; `/impound` and `/repair` resolve the client's network id back
+  to the real vehicle before doing anything. Each action is appended to `job_actions`.
 - **Hubs placed in-game.** `/setworkhub <courier|taxi>` moves a start point to where an admin is
   standing and saves it to `workhubs.txt`, so no coordinates have to be typed by hand.
 - **History, not live state.** Active runs live in memory because they belong to a session; every
@@ -524,7 +542,9 @@ Jobs with grades, a duty toggle, automatic paychecks and repeatable activities, 
 
 Jobs and grades: courier (Courier, Senior Courier), police (Cadet, Officer, Sergeant),
 ems (Trainee, Paramedic, Chief), mechanic (Apprentice, Mechanic), taxi (Driver), unemployed.
-Requires `oxmysql`, `bank-cs` and OneSync. Set `jobs_require_vehicle 0` to allow activities on foot.
+Requires `oxmysql`, `bank-cs`, `inventory-cs` and OneSync. `garage-cs` is needed for `/impound`
+to remove the live vehicle (the database row is still updated without it). Set
+`jobs_require_vehicle 0` to allow activities on foot.
 
 ### admin-cs
 

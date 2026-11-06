@@ -260,7 +260,10 @@ namespace Races.Server
             }
 
             // The server checks the real model, not the one the client claims it made.
-            if (GetEntityModel(entity) != (uint)GetHashKey(race.Route.Model))
+            // Both natives return a signed int hash. Comparing int to (uint) promotes both to long,
+            // which never matches a model whose hash has the high bit set (comet2, buffalo, ...).
+            // Keep the comparison signed so every model verifies.
+            if (GetEntityModel(entity) != GetHashKey(race.Route.Model))
             {
                 EndRace(race, "failed", "That is not the race vehicle.", 0, false, 0, CancelCooldownMs);
                 return;

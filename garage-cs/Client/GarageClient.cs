@@ -36,6 +36,8 @@ namespace Garage.Client
             RegisterCommand("engine", new Action<int, List<object>, string>((s, a, r) => ToggleEngine()), false);
             RegisterKeyMapping("engine", "Engine on / off", "keyboard", "K");
 
+            RegisterCommand("vehicle", new Action<int, List<object>, string>((s, a, r) => ShowVehicle()), false);
+
             Tick += KeepEngineOff;
         }
 
@@ -221,6 +223,24 @@ namespace Garage.Client
 
             await Delay(25000); // the blips are temporary
             foreach (var b in blips) { int blip = b; RemoveBlip(ref blip); }
+        }
+
+        // ---------- vehicle info ----------
+
+        // Read-only diagnostic. Health lives in the local game world and is not replicated to the
+        // server, so this shows the value the garage would report when the car is parked. It grants
+        // no authority: nothing here is sent anywhere or can change state.
+        void ShowVehicle()
+        {
+            int veh = CurrentOrNearbyVehicle();
+            if (veh == 0) { Notify("No vehicle nearby."); return; }
+
+            string plate = GetVehicleNumberPlateText(veh).Trim();
+            int engine = (int)Math.Round(GetVehicleEngineHealth(veh));
+            int body = (int)Math.Round(GetVehicleBodyHealth(veh));
+            int repair = Math.Max(0, 1000 - engine) * 2 + Math.Max(0, 1000 - body) * 2;
+
+            Notify($"[{plate}] engine {engine}/1000, body {body}/1000 (about ${repair} to repair). Park to save it.");
         }
 
         // ---------- helpers ----------

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using CitizenFX.Core;
 using static CitizenFX.Core.Native.API;
 
@@ -24,8 +23,6 @@ namespace Phone.Server
         const int MaxPayment = 50000;
         const long CooldownMs = 300;
         const long SendCooldownMs = 1000;
-
-        static readonly Regex NumberFormat = new Regex(@"^\d{3}-\d{4}$", RegexOptions.Compiled);
 
         readonly Random _rng = new Random();
         readonly Dictionary<int, string> _numbers = new Dictionary<int, string>();   // player -> own number
@@ -88,7 +85,7 @@ namespace Phone.Server
                 if (rows.Count == 1) { Assign(src, rows[0]["number"].ToString().Trim(), done); return; }
                 if (attempt >= 8) { Debug.WriteLine("[phone] could not allocate a number for " + p.Name); return; }
 
-                string candidate = "555-" + _rng.Next(0, 10000).ToString("D4", CultureInfo.InvariantCulture);
+                string candidate = "555" + _rng.Next(0, 10000).ToString("D4", CultureInfo.InvariantCulture);
                 // INSERT IGNORE: a taken number (or a concurrent insert for the same licence) inserts nothing, so we retry/re-read.
                 Db("INSERT IGNORE INTO phone_numbers (license, number) VALUES (?, ?)", new object[] { license, candidate }, affected =>
                 {
@@ -146,18 +143,32 @@ namespace Phone.Server
         {
             if (!Gate(p)) return;
             name = Clean(name, MaxNameLength);
-            number = (number ?? "").Trim();
-            if (name.Length == 0 || !NumberFormat.IsMatch(number)) { Say(p, "Enter a name and a number like 555-0123."); return; }
+            number = NormalizeNumber(number);
+            if (name.Length == 0 || number == null)
+            {
+                Debug.WriteLine("[phone] " + p.Name + " add contact rejected (name='" + name + "', number='" + (number ?? "?") + "')");
+                ContactResult(p, false, "Enter a name and a 7-digit number like 5550123.");
+                return;
+            }
 
             EnsureNumber(p, own =>
             {
                 string license = License(p);
                 Query("SELECT COUNT(*) AS n FROM phone_contacts WHERE owner = ?", new object[] { license }, rows =>
                 {
-                    if (Convert.ToInt32(rows[0]["n"]) >= MaxContacts) { Say(p, "Your contact list is full."); return; }
+                    if (Convert.ToInt32(rows[0]["n"]) >= MaxContacts)
+                    {
+                        ContactResult(p, false, "Your contact list is full.");
+                        return;
+                    }
                     // Saving a number you already have just renames that contact.
                     Db("INSERT INTO phone_contacts (owner, name, number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)",
-                       new object[] { license, name, number }, _ => SendState(p, own));
+                       new object[] { license, name, number }, _ =>
+                       {
+                           Debug.WriteLine("[phone] " + p.Name + " saved contact " + name + " (" + number + ")");
+                           ContactResult(p, true, name + " saved to contacts.");
+                           SendState(p, own);
+                       });
                 });
             });
         }
@@ -183,9 +194,9 @@ namespace Phone.Server
             long now = GetGameTimer(), last;
             if (_lastSend.TryGetValue(src, out last) && now - last < SendCooldownMs) { Say(p, "You are sending messages too fast."); return; }
 
-            to = (to ?? "").Trim();
+            to = NormalizeNumber(to);
             body = Clean(body, MaxBodyLength);
-            if (!NumberFormat.IsMatch(to) || body.Length == 0) return;
+            if (to == null || body.Length == 0) return;
             _lastSend[src] = now;
 
             EnsureNumber(p, own =>
@@ -211,8 +222,8 @@ namespace Phone.Server
         void OnMarkRead([FromSource] Player p, string from)
         {
             if (!Gate(p)) return;
-            from = (from ?? "").Trim();
-            if (!NumberFormat.IsMatch(from)) return;
+            from = NormalizeNumber(from);
+            if (from == null) return;
             EnsureNumber(p, own =>
                 Db("UPDATE phone_messages SET seen = 1 WHERE to_number = ? AND from_number = ? AND seen = 0", new object[] { own, from }, _ => { }));
         }
@@ -246,12 +257,16 @@ namespace Phone.Server
 
             TriggerClientEvent(p, "phone:push",
                 "{\"type\":\"emergency\",\"ok\":" + (ok ? "true" : "false") + ",\"state\":\"placed\"}", false);
+
+            Debug.WriteLine($"[phone] {p.Name} emergency {category} -> {ok}");
         }
 
         [EventHandler("phone:emergencyCancel")]
         void OnEmergencyCancel([FromSource] Player p)
         {
-            if (!Gate(p)) return;
+            // Deliberately not behind Gate: the caller may tap Cancel in the same instant the
+            // 911 request is accepted, and a shared 300 ms cooldown must never swallow it.
+            if (p == null) return;
 
             bool ok = false;
             try
@@ -266,6 +281,8 @@ namespace Phone.Server
 
             TriggerClientEvent(p, "phone:push",
                 "{\"type\":\"emergency\",\"ok\":" + (ok ? "true" : "false") + ",\"state\":\"cancelled\"}", false);
+
+            Debug.WriteLine($"[phone] {p.Name} cancel emergency -> {ok}");
         }
 
         // ==================================================================
@@ -276,8 +293,8 @@ namespace Phone.Server
         void OnPay([FromSource] Player p, string to, int amount)
         {
             if (!Gate(p)) return;
-            to = (to ?? "").Trim();
-            if (!NumberFormat.IsMatch(to) || amount < 1 || amount > MaxPayment) { Say(p, $"Enter a number and an amount between $1 and ${MaxPayment}."); return; }
+            to = NormalizeNumber(to);
+            if (to == null || amount < 1 || amount > MaxPayment) { Say(p, $"Enter a number and an amount between $1 and ${MaxPayment}."); return; }
 
             EnsureNumber(p, own =>
             {
@@ -335,6 +352,16 @@ namespace Phone.Server
         static string MessageJson(string from, string to, string body, long id, long at, bool seen) =>
             "{\"id\":" + id + ",\"from\":" + J(from) + ",\"to\":" + J(to) + ",\"body\":" + J(body) + ",\"at\":" + at + ",\"seen\":" + (seen ? "true" : "false") + "}";
 
+        // Numbers are plain 7 digits ("5550123"). Players should never have to type punctuation,
+        // and one canonical form keeps contacts, threads and payments in step.
+        static string NormalizeNumber(string s)
+        {
+            if (s == null) return null;
+            var digits = new StringBuilder(7);
+            foreach (char c in s) if (c >= '0' && c <= '9') digits.Append(c);
+            return digits.Length == 7 ? digits.ToString() : null;
+        }
+
         // Strips control characters and trims; never longer than max.
         static string Clean(string s, int max)
         {
@@ -391,5 +418,14 @@ namespace Phone.Server
 
         void Say(Player p, string msg) =>
             TriggerClientEvent(p, "chat:addMessage", new { color = new[] { 90, 200, 255 }, args = new[] { "Phone", msg } });
+
+        // Contact actions report back twice: in chat (as before) and to the page, so the form can
+        // show the reason it refused instead of appearing to do nothing.
+        void ContactResult(Player p, bool ok, string msg)
+        {
+            Say(p, msg);
+            TriggerClientEvent(p, "phone:push",
+                "{\"type\":\"contact\",\"ok\":" + (ok ? "true" : "false") + ",\"message\":" + J(msg) + "}", false);
+        }
     }
 }

@@ -3,7 +3,7 @@ game 'gta5'
 
 author 'firuss'
 description 'Phone in C#: number per player, contacts, text messages, phone banking and 911/912 emergency calls over MySQL, NUI interface'
-version '0.2.0'
+version '0.3.2'
 
 dependencies {
     'oxmysql',

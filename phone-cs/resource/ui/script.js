@@ -106,6 +106,22 @@ function openConversation(number) {
 }
 
 // ---------- forms ----------
+
+// Numbers are 7 digits (5550123). Keep only digits so players never have to remember punctuation.
+function formatNumberInput(e) {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 7);
+}
+$('cNumber').addEventListener('input', formatNumberInput);
+$('newTo').addEventListener('input', formatNumberInput);
+$('payTo').addEventListener('input', formatNumberInput);
+
+function contactError(text, ok) {
+  const e = $('cError');
+  e.textContent = text || '';
+  e.classList.toggle('ok', !!ok);
+}
+$('cName').addEventListener('input', () => contactError(''));
+
 $('back').onclick = () => { showTab('messages'); render(); };
 $('composer').onsubmit = (e) => {
   e.preventDefault();
@@ -117,12 +133,18 @@ $('composer').onsubmit = (e) => {
 $('newMessage').onsubmit = (e) => {
   e.preventDefault();
   const n = $('newTo').value.trim();
-  if (/^\d{3}-\d{4}$/.test(n)) { $('newTo').value = ''; openConversation(n); }
+  if (/^\d{7}$/.test(n)) { $('newTo').value = ''; openConversation(n); }
 };
 $('addContact').onsubmit = (e) => {
   e.preventDefault();
-  post('addContact', { name: $('cName').value, number: $('cNumber').value.trim() });
+  const name = $('cName').value.trim();
+  const number = $('cNumber').value.trim();
+  if (!name) { contactError('Enter a name.'); $('cName').focus(); return; }
+  if (!/^\d{7}$/.test(number)) { contactError('Enter a 7-digit number like 5550123.'); $('cNumber').focus(); return; }
+  contactError('');
+  post('addContact', { name, number });
   $('cName').value = $('cNumber').value = '';
+  $('cName').focus();
 };
 $('payForm').onsubmit = (e) => {
   e.preventDefault();
@@ -175,6 +197,7 @@ window.addEventListener('message', ({ data }) => {
     render();
   }
   if (data.type === 'balance') $('bankBalance').textContent = money(data.bank);
+  if (data.type === 'contact') contactError(data.message, data.ok);
   if (data.type === 'emergency') {
     if (data.state === 'cancelled') {
       $('emgState').textContent = data.ok ? 'Call cancelled.' : 'You have no active call.';
@@ -190,10 +213,10 @@ window.addEventListener('message', ({ data }) => {
 // Plain-browser preview (outside the game): show the phone with sample data.
 if (typeof GetParentResourceName !== 'function' && location.hash === '#demo') {
   window.postMessage({ type: 'open' }, '*');
-  window.postMessage({ type: 'state', number: '555-0142', bank: 12500,
-    contacts: [{ id: 1, name: 'Mia', number: '555-0100' }],
+  window.postMessage({ type: 'state', number: '5550142', bank: 12500,
+    contacts: [{ id: 1, name: 'Mia', number: '5550100' }],
     messages: [
-      { id: 1, from: '555-0100', to: '555-0142', body: 'Are you coming tonight?', at: 0, seen: false },
-      { id: 2, from: '555-0142', to: '555-0100', body: 'Yes, see you at the garage', at: 0, seen: true },
+      { id: 1, from: '5550100', to: '5550142', body: 'Are you coming tonight?', at: 0, seen: false },
+      { id: 2, from: '5550142', to: '5550100', body: 'Yes, see you at the garage', at: 0, seen: true },
     ] }, '*');
 }

@@ -3,20 +3,24 @@
 <head>
   <meta charset="utf-8">
   <title>Phone</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=0.3.2">
 </head>
 <body>
   <main id="phone" class="hidden">
     <header>
-      <span id="myNumber">---</span>
+      <div class="brand">
+        <strong>Phone</strong>
+        <span id="myNumber">---</span>
+      </div>
       <button id="close" aria-label="Close">&times;</button>
     </header>
 
     <!-- Messages: conversation list, then a thread -->
     <section id="tab-messages" class="tab">
+      <div class="tabhead">Messages</div>
       <div id="threads"></div>
       <form id="newMessage">
-        <input id="newTo" placeholder="New message to 555-0123" maxlength="8" autocomplete="off">
+        <input id="newTo" placeholder="New message to 5550123" maxlength="7" autocomplete="off">
         <button>Open</button>
       </form>
     </section>
@@ -32,19 +36,25 @@
 
     <!-- Contacts -->
     <section id="tab-contacts" class="tab hidden">
+      <div class="tabhead">Contacts</div>
       <div id="contacts"></div>
-      <form id="addContact">
-        <input id="cName" placeholder="Name" maxlength="24" autocomplete="off">
-        <input id="cNumber" placeholder="555-0123" maxlength="8" autocomplete="off">
-        <button>Add</button>
+      <form id="addContact" autocomplete="off">
+        <input id="cName" placeholder="Contact name" maxlength="24" autocomplete="off">
+        <div class="row2">
+          <input id="cNumber" placeholder="5550123" maxlength="7" inputmode="numeric" autocomplete="off">
+          <button type="submit">Add</button>
+        </div>
       </form>
+      <p id="cError" class="err"></p>
+      <p class="hint small">A number is 7 digits: 5550123</p>
     </section>
 
     <!-- Bank -->
     <section id="tab-bank" class="tab hidden">
+      <div class="tabhead">Bank</div>
       <div class="balance"><small>Bank balance</small><strong id="bankBalance">$0</strong></div>
       <form id="payForm">
-        <input id="payTo" placeholder="Pay number, e.g. 555-0123" maxlength="8" autocomplete="off">
+        <input id="payTo" placeholder="Pay number, e.g. 5550123" maxlength="7" autocomplete="off">
         <input id="payAmount" type="number" min="1" max="50000" placeholder="Amount">
         <button>Send money</button>
       </form>
@@ -71,6 +81,6 @@
       <button data-tab="emergency">Emergency</button>
     </nav>
   </main>
-  <script src="script.js"></script>
+  <script src="script.js?v=0.3.2"></script>
 </body>
 </html>

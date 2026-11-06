@@ -110,10 +110,13 @@ namespace Dealer.Server
 
             // The showroom is tunable from server.cfg; the client is told where it is, so both
             // sides always agree and the client never decides where the dealership is.
+            // The marker sits on the forecourt, not inside the building: the vanilla PDM
+            // interior floor is not streamed on every client, so standing inside drops a
+            // player through the map. (-45, -1098) is the middle of the showroom floor.
             _showroom = new Vector3(
-                GetConvarFloat("dealer_showroom_x", -45.0f),
-                GetConvarFloat("dealer_showroom_y", -1098.0f),
-                GetConvarFloat("dealer_showroom_z", 26.4f));
+                GetConvarFloat("dealer_showroom_x", -56.8f),
+                GetConvarFloat("dealer_showroom_y", -1109.9f),
+                GetConvarFloat("dealer_showroom_z", 25.44f));
             _range = ClampFloat(GetConvarFloat("dealer_range", 8.0f), 3f, 30f);
             _testSeconds = Math.Max(30, Math.Min(300, GetConvarInt("dealer_testdrive_seconds", 90)));
             _sellMinPercent = Math.Max(0, Math.Min(100, GetConvarInt("dealer_sell_min_percent", 35)));
@@ -449,7 +452,9 @@ namespace Dealer.Server
 
             int ped = GetPlayerPed(p.Handle);
             bool seated = ped != 0 && GetVehiclePedIsIn(ped, false) == entity;
-            bool modelOk = GetEntityModel(entity) == (uint)GetHashKey(td.Model);
+            // Signed-int comparison on purpose: see the note in races-cs; casting one side to uint
+            // breaks every model whose hash has the high bit set.
+            bool modelOk = GetEntityModel(entity) == GetHashKey(td.Model);
             bool nearOk = Vector3.Distance(GetEntityCoords(entity), _showroom) <= TestDriveScene;
 
             if (!seated || !modelOk || !nearOk)
@@ -670,7 +675,7 @@ namespace Dealer.Server
             }
 
             int ped = GetPlayerPed(p.Handle);
-            bool modelOk = GetEntityModel(entity) == (uint)GetHashKey(r.Model);
+            bool modelOk = GetEntityModel(entity) == GetHashKey(r.Model);
             bool nearOk = ped != 0 && Vector3.Distance(GetEntityCoords(entity), GetEntityCoords(ped)) <= RentalCarScene;
 
             if (!modelOk || !nearOk)

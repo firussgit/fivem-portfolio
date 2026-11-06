@@ -22,6 +22,7 @@ namespace Dealer.Client
         int _blip;
         bool _open;
         int _releaseUntil;
+        int _lastRecover;
         int _testCar;
         int _rentalCar;
 
@@ -140,6 +141,28 @@ namespace Dealer.Client
             _blip = 0;
         }
 
+        // The vanilla PDM interior floor is not streamed on every client. A player who walks
+        // through the showroom glass falls into the void; put them back on the forecourt
+        // instead of leaving them under the map (and letting spawn-core save that position).
+        void RecoverFromVoid(int ped)
+        {
+            Vector3 target = new Vector3(_showroom.X, _showroom.Y, _showroom.Z + 0.5f);
+            RequestCollisionAtCoord(target.X, target.Y, target.Z);
+
+            int veh = GetVehiclePedIsIn(ped, false);
+            if (veh != 0) SetPedCoordsKeepVehicle(ped, target.X, target.Y, target.Z);
+            else SetEntityCoordsNoOffset(ped, target.X, target.Y, target.Z, false, false, false);
+
+            SetEntityVelocity(ped, 0f, 0f, 0f);
+            if (veh != 0) SetEntityVelocity(veh, 0f, 0f, 0f);
+
+            _lastRecover = GetGameTimer() + 4000;
+            TriggerEvent("chat:addMessage", new
+            {
+                args = new[] { "Dealer", "The showroom interior is not loaded here, so you were moved back to the forecourt." }
+            });
+        }
+
         // ---------- NUI ----------
 
         void OnShow(string json)
@@ -189,6 +212,23 @@ namespace Dealer.Client
             int ped = PlayerPedId();
             Vector3 me = GetEntityCoords(ped, true);
             float distance = Vector3.Distance(me, _showroom);
+
+            // Fall guard: below the forecourt and inside the building block, while falling.
+            // The horizontal test is used because the void is far away in 3D by then.
+            if (GetGameTimer() >= _lastRecover && me.Z < 12f)
+            {
+                float dx = me.X - _showroom.X;
+                float dy = me.Y - _showroom.Y;
+                int veh = GetVehiclePedIsIn(ped, false);
+                bool inAir = IsPedFalling(ped) || (veh != 0 && IsEntityInAir(veh));
+
+                if (dx * dx + dy * dy < 3600f && inAir) // within 60 m of the marker
+                {
+                    RecoverFromVoid(ped);
+                    await Delay(1000);
+                    return;
+                }
+            }
 
             if (distance > _range + 25f)
             {

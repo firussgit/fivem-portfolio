@@ -23,6 +23,7 @@ namespace Dealer.Client
         bool _open;
         int _releaseUntil;
         int _testCar;
+        int _rentalCar;
 
         public DealerClient()
         {
@@ -31,6 +32,8 @@ namespace Dealer.Client
             RegisterNuiCallbackType("buy");
             RegisterNuiCallbackType("sell");
             RegisterNuiCallbackType("testdrive");
+            RegisterNuiCallbackType("rent");
+            RegisterNuiCallbackType("returncar");
 
             EventHandlers["dealer:showroom"] += new Action<float, float, float, float, string>(OnShowroom);
             EventHandlers["dealer:show"] += new Action<string>(OnShow);
@@ -39,6 +42,9 @@ namespace Dealer.Client
             EventHandlers["dealer:testdrive"] += new Action<string, string>(OnTestDrive);
             EventHandlers["dealer:testdriveTick"] += new Action<string, string, int>(OnTestDriveTick);
             EventHandlers["dealer:testdriveEnd"] += new Action<string>(OnTestDriveEnd);
+            EventHandlers["dealer:rentalSpawn"] += new Action<string, string>(OnRentalSpawn);
+            EventHandlers["dealer:rentalTick"] += new Action<string, string, int>(OnRentalTick);
+            EventHandlers["dealer:rentalEnd"] += new Action<string>(OnRentalEnd);
 
             EventHandlers["__cfx_nui:close"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
             {
@@ -73,6 +79,24 @@ namespace Dealer.Client
                 cb("ok");
             });
 
+            EventHandlers["__cfx_nui:rent"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
+            {
+                string model = Convert.ToString(d["model"]);
+                string account = Convert.ToString(d["account"]);
+
+                // Close first: the server is about to spawn a car next to the player.
+                Close();
+                TriggerServerEvent("dealer:rent", model, account);
+                cb("ok");
+            });
+
+            EventHandlers["__cfx_nui:returncar"] += new Action<IDictionary<string, object>, CallbackDelegate>((d, cb) =>
+            {
+                // The page stays open; the server sends the refreshed state when the lease ends.
+                TriggerServerEvent("dealer:returncar");
+                cb("ok");
+            });
+
             TriggerServerEvent("dealer:requestShowroom");
             Tick += OnTick;
         }
@@ -82,10 +106,12 @@ namespace Dealer.Client
         {
             if (name != GetCurrentResourceName()) return;
             CleanupTestCar();
+            CleanupRentalCar();
             RemoveShowroomBlip();
             if (_open) SetNuiFocus(false, false);
             SendNuiMessage("{\"type\":\"close\"}");
             SendNuiMessage("{\"type\":\"testdriveEnd\"}");
+            SendNuiMessage("{\"type\":\"rentalEnd\"}");
         }
 
         // ---------- showroom ----------
@@ -250,6 +276,74 @@ namespace Dealer.Client
             int car = _testCar;
             if (car != 0 && DoesEntityExist(car)) DeleteEntity(ref car);
             _testCar = 0;
+        }
+
+        // ---------- rental ----------
+
+        async void OnRentalSpawn(string model, string plate)
+        {
+            CleanupRentalCar();
+
+            uint hash = (uint)GetHashKey(model);
+            if (!IsModelInCdimage(hash) || !IsModelAVehicle(hash))
+            {
+                TriggerServerEvent("dealer:rentalFailed");
+                return;
+            }
+
+            RequestModel(hash);
+            for (int i = 0; i < 100 && !HasModelLoaded(hash); i++) await Delay(50);
+            if (!HasModelLoaded(hash))
+            {
+                TriggerServerEvent("dealer:rentalFailed");
+                return;
+            }
+
+            // A resume can arrive while the client is still loading; wait for a real ped first.
+            for (int i = 0; i < 150 && (PlayerPedId() == 0 || !IsPlayerPlaying(PlayerId())); i++) await Delay(100);
+            if (PlayerPedId() == 0)
+            {
+                TriggerServerEvent("dealer:rentalFailed");
+                return;
+            }
+
+            int ped = PlayerPedId();
+            Vector3 pos = GetOffsetFromEntityInWorldCoords(ped, 0f, 4f, 0.5f);
+            int veh = CreateVehicle(hash, pos.X, pos.Y, pos.Z, GetEntityHeading(ped), true, false);
+
+            SetVehicleNumberPlateText(veh, plate);
+            SetVehicleEngineOn(veh, true, true, false);
+            SetEntityAsMissionEntity(veh, true, true);
+            SetModelAsNoLongerNeeded(hash);
+
+            _rentalCar = veh;
+
+            // A resumed lease should not pull the player out of whatever they are driving;
+            // a fresh rental always starts on foot, so there they are seated straight away.
+            if (GetVehiclePedIsIn(ped, false) == 0) SetPedIntoVehicle(ped, veh, -1);
+
+            // Give the entity a moment to replicate, then let the server verify what was spawned.
+            await Delay(1000);
+            if (DoesEntityExist(veh)) TriggerServerEvent("dealer:rentalStarted", NetworkGetNetworkIdFromEntity(veh), plate);
+        }
+
+        void OnRentalTick(string model, string label, int remaining)
+        {
+            SendNuiMessage("{\"type\":\"rental\",\"model\":" + Json(model) +
+                           ",\"label\":" + Json(label) + ",\"remaining\":" + remaining + "}");
+        }
+
+        void OnRentalEnd(string reason)
+        {
+            CleanupRentalCar();
+            SendNuiMessage("{\"type\":\"rentalEnd\"}");
+        }
+
+        void CleanupRentalCar()
+        {
+            int car = _rentalCar;
+            if (car != 0 && DoesEntityExist(car)) DeleteEntity(ref car);
+            _rentalCar = 0;
         }
 
         static string Json(string s)

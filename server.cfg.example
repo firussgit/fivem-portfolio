@@ -40,6 +40,10 @@ set dealer_range 8                    # metres: how close a player must be to bu
 set dealer_testdrive_seconds 90       # test drive limit
 set dealer_sell_min_percent 35        # trade-in offer for a wrecked car
 set dealer_sell_max_percent 60        # trade-in offer for a perfect car
+set dealer_rent_minutes 20            # rental length in minutes
+set dealer_rent_fee_percent 4         # rental fee as a percent of the catalogue price
+set dealer_rent_deposit_percent 10    # refundable deposit as a percent of the catalogue price
+set dealer_rent_deposit_max 5000      # deposit cap
 
 # First SuperAdmin for admin-cs: your Rockstar licence, e.g. license:xxxxxxxxxxxxxxxx (see /id after joining)
 # set admin_bootstrap_license "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

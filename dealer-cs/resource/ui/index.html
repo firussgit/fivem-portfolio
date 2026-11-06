@@ -22,6 +22,7 @@
 
     <nav>
       <button class="tab active" data-tab="showroom">Showroom</button>
+      <button class="tab" data-tab="rent">Rent a car</button>
       <button class="tab" data-tab="sell">Sell your car</button>
     </nav>
 
@@ -31,6 +32,22 @@
       <div id="catalog" class="grid"></div>
     </section>
 
+    <section id="rentTab" class="pane hidden">
+      <p class="lead">
+        Rent a car for <strong id="rentMinutes">20</strong> minutes. The fee is kept; the deposit
+        comes back when you return the car to the showroom in time.
+      </p>
+      <div id="rentalActive" class="rental-banner hidden">
+        <div>
+          <span class="kicker">ACTIVE RENTAL</span>
+          <strong id="rentalBannerModel">Vehicle</strong>
+          <span id="rentalBannerMeta" class="tag">RENT0000</span>
+        </div>
+        <button id="returnCar" class="ghost">Return · refund deposit</button>
+      </div>
+      <div id="rentals" class="grid"></div>
+    </section>
+
     <section id="sellTab" class="pane hidden">
       <p class="lead">Trade in a stored car. The offer depends on its engine and body condition.</p>
       <div id="owned" class="grid"></div>
@@ -38,7 +55,7 @@
     </section>
 
     <footer>
-      <span>Test drives are free and last 90 seconds.</span>
+      <span>Test drives are free. Rentals charge a fee plus a refundable deposit.</span>
       <span>Press ESC to leave</span>
     </footer>
   </main>
@@ -48,6 +65,13 @@
     <strong id="tdModel">Vehicle</strong>
     <span id="tdTime">1:30</span>
     <p>Leave the car or run out of time to end the drive.</p>
+  </section>
+
+  <section id="rental" class="hidden">
+    <span class="kicker">RENTAL</span>
+    <strong id="rentalModel">Vehicle</strong>
+    <span id="rentalTime">20:00</span>
+    <p id="rentalNote">Return at the showroom to get the deposit back.</p>
   </section>
 
   <section id="toasts"></section>

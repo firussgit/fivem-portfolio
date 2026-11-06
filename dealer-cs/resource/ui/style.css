@@ -280,9 +280,10 @@ footer {
   font-size: 11px;
 }
 
-/* ---------- test-drive HUD ---------- */
+/* ---------- test-drive / rental HUD ---------- */
 
-#testdrive {
+#testdrive,
+#rental {
   position: fixed;
   top: 26px;
   left: 50%;
@@ -297,13 +298,15 @@ footer {
   backdrop-filter: blur(6px);
 }
 
-#testdrive strong {
+#testdrive strong,
+#rental strong {
   display: block;
   margin: 3px 0 1px;
   font-size: 16px;
 }
 
-#tdTime {
+#tdTime,
+#rentalTime {
   display: block;
   color: var(--gold);
   font-size: 22px;
@@ -311,12 +314,42 @@ footer {
   font-variant-numeric: tabular-nums;
 }
 
-#tdTime.low { color: var(--low); }
+#tdTime.low,
+#rentalTime.low { color: var(--low); }
 
-#testdrive p {
+#testdrive p,
+#rental p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 10.5px;
+}
+
+/* ---------- active rental banner ---------- */
+
+.rental-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 193, 77, .35);
+  border-radius: 10px;
+  background: rgba(255, 193, 77, .07);
+}
+
+.rental-banner strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
+}
+
+.rental-banner .tag { margin-top: 2px; }
+
+.rental-banner button {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  white-space: nowrap;
 }
 
 /* ---------- toasts ---------- */

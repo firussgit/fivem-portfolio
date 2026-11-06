@@ -26,7 +26,7 @@ and answers with the new truth.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
-| [`dealer-cs`](dealer-cs) | C# + MySQL + NUI | Player dealership: server-priced showroom, cash/bank purchases, free test drives and condition-based trade-ins |
+| [`dealer-cs`](dealer-cs) | C# + MySQL + NUI | Player dealership: server-priced showroom, cash/bank purchases, timed rentals, free test drives and condition-based trade-ins |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
@@ -83,7 +83,8 @@ and answers with the new truth.
 - **Dealership:** `dealer-cs` prices and validates the sale, charges `bank-cs`, inserts the owned
   row into `player_vehicles`, then asks `garage-cs` to hand the car over through its server-only
   `deliver` export. A trade-in pays through `bank-cs` and deletes the row only if it is still
-  stored, non-stolen and owned by the seller.
+  stored, non-stolen and owned by the seller. A rental never touches `player_vehicles`: it is a
+  lease row in `rentals` plus a verified temp car, so it can't be sold or parked.
 - Resources degrade gracefully: without `jobs-cs` there's just no mechanic discount; without
   `bank-cs` a purchase aborts before anything changes.
 
@@ -95,7 +96,8 @@ and answers with the new truth.
 | **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call / showroom" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch, dealer |
 | **Anti-teleport checks.** A job stop, a dispatch "on scene" or a race checkpoint only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch, races |
 | **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races, dealer test drives |
-| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim, dealer sell |
+| **Expiry that survives a relog.** A lease is a wall-clock timestamp in the database, and the spawned car is verified like a test car, so closing the game can't freeze or reset the clock. | dealer rentals |
+| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim, dealer sell, rental start |
 | **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
 | **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone, dealer |
 | **Strict input validation and rate limiting.** Bounds, lengths, formats, whitelists, per-player cooldowns. | every resource |
@@ -172,10 +174,14 @@ set dispatch_call_cooldown_seconds 20 # minimum gap between a player's 911 calls
 set dealer_showroom_x -45.0           # dealership showroom position (dealer-cs)
 set dealer_showroom_y -1098.0
 set dealer_showroom_z 26.4
-set dealer_range 8                    # metres: how close a player must be to buy / sell / test drive
+set dealer_range 8                    # metres: how close a player must be to buy / rent / sell / test drive
 set dealer_testdrive_seconds 90       # test drive limit
 set dealer_sell_min_percent 35        # trade-in offer for a wrecked car
 set dealer_sell_max_percent 60        # trade-in offer for a perfect car
+set dealer_rent_minutes 20            # rental length
+set dealer_rent_fee_percent 4         # rental fee as a percent of the catalogue price
+set dealer_rent_deposit_percent 10    # refundable deposit as a percent of the catalogue price
+set dealer_rent_deposit_max 5000      # deposit cap
 set admin_bootstrap_license "xxxxxxxx"   # first SuperAdmin (admin-cs); keep it out of git
 ```
 
@@ -229,6 +235,8 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | `/buycar <model> [cash\|bank]` | dealer-cs | Buys a car at the showroom (default bank) | `/buycar sultan bank` |
 | `/testdrive <model>` | dealer-cs | Free 90-second test drive from the showroom | `/testdrive comet2` |
 | `/sellcar <vehicle id>` | dealer-cs | Trades in a stored, non-stolen car; the offer is paid to your bank | `/sellcar 4` |
+| `/rentcar <model> [cash\|bank]` | dealer-cs | Rents a catalogue car: fee plus refundable deposit (default bank) | `/rentcar comet2 bank` |
+| `/returncar` | dealer-cs | Returns the rental at the showroom and refunds the deposit | `/returncar` |
 | `/jobs` | jobs-cs | Lists available jobs | `/jobs` |
 | `/job` | jobs-cs | Shows your job, grade, salary and duty state | `/job` |
 | `/duty` | jobs-cs | Toggles duty (you only get paychecks on duty) | `/duty` |
@@ -318,7 +326,7 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 11. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
 12. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
 13. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
-14. **A dealership.** Go to Premium Deluxe Motorsport (the yellow car blip), stand on the marker and press **E**. Browse the server-priced catalogue, then try **Test drive** for a free 90-second car, or buy with **Cash** / **Bank**: the bank charge and the garage insert happen on the server, and the car is handed over through the garage's normal spawn path. Open **Sell your car** to trade in a stored car; the offer depends on its engine and body condition. The sales history is in `dealer_sales`.
+14. **A dealership.** Go to Premium Deluxe Motorsport (the yellow car blip), stand on the marker and press **E**. Browse the server-priced catalogue, then try **Test drive** for a free 90-second car, or buy with **Cash** / **Bank**: the bank charge and the garage insert happen on the server, and the car is handed over through the garage's normal spawn path. **Rent a car** leases the same models for 20 minutes: the fee is kept and the deposit comes back when you return the car at the showroom (`/returncar`). Open **Sell your car** to trade in a stored car; the offer depends on its engine and body condition. The sales and lease history is in `dealer_sales` and `rentals`.
 15. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
 16. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
@@ -401,8 +409,8 @@ without it the garage still works, but lockpicks can't start a hotwire.
 
 ### dealer-cs
 
-A player-facing way to acquire and dispose of vehicles, built so the money and the car can't go
-their separate ways.
+A player-facing way to acquire, rent and dispose of vehicles, built so the money and the car can't
+go their separate ways.
 
 - **Server-priced catalogue.** The 10 whitelisted garage models have fixed prices on the server
   (Faggio $5,000 up to Adder $120,000). The UI can only send a model id and "cash" or "bank".
@@ -424,15 +432,27 @@ their separate ways.
   server verifies the real entity's plate, model and seated driver at the showroom before starting
   the clock. Leaving the car, losing it, the time limit or a disconnect ends the drive, and the
   server deletes the car. There is no database row, so `/park` can't keep a test car.
+- **Timed rentals.** A rental is a lease, not a purchase: it is deliberately **not** a
+  `player_vehicles` row, so it can't be parked, sold, insured or shown in `/garage`. The player
+  pays a non-refundable fee plus a refundable deposit (both charged together), and the server
+  inserts one open row in `rentals`. The car spawns with a server-issued `RENT####` plate and is
+  verified like a test car. Returning it at the showroom refunds the deposit; reaching the expiry
+  or losing the car keeps it. Expiry is a fixed wall-clock timestamp stored in the database, so
+  time spent offline still counts and relogging can't reset the lease; a reconnect resumes an
+  unexpired rental. `uq_active_license` (a unique index on a generated column) makes "one open
+  lease per player" a database rule, so two simultaneous requests can never both win.
 - **History.** Every completed purchase and trade-in is a row in `dealer_sales` (licence, kind,
-  model, plate, amount, account). The table is created on start; see `sql/install.sql`.
+  model, plate, amount, account), and every lease is a row in `rentals` with its fee, deposit and
+  end reason. Both tables are created on start; see `sql/install.sql`.
 - **NUI holds no authority.** The page renders the catalogue, balances and offers; it writes user
   data with `textContent` and posts intent through NUI callbacks. The server revalidates every
   click, including the showroom distance.
 - **One capped garage.** The dealership enforces the same 10-vehicle cap as `garage-cs`.
 
 The showroom position and the economics are server convars (`dealer_showroom_x/y/z`,
-`dealer_range`, `dealer_testdrive_seconds`, `dealer_sell_min_percent`, `dealer_sell_max_percent`).
+`dealer_range`, `dealer_testdrive_seconds`, `dealer_sell_min_percent`, `dealer_sell_max_percent`,
+`dealer_rent_minutes`, `dealer_rent_fee_percent`, `dealer_rent_deposit_percent`,
+`dealer_rent_deposit_max`).
 Requires `oxmysql`, `bank-cs`, `garage-cs` and OneSync.
 
 ### customs-cs

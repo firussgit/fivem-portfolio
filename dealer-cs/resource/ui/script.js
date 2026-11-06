@@ -33,6 +33,7 @@ function setState(next) {
   $('fullNote').classList.toggle('hidden', !full);
 
   renderCatalog();
+  renderRent();
   renderOwned();
 }
 
@@ -89,6 +90,74 @@ function renderCatalog() {
 
     actions.append(test, buyCash, buyBank);
     card.append(top, model, actions);
+    root.appendChild(card);
+  }
+}
+
+function renderRent() {
+  const root = $('rentals');
+  root.innerHTML = '';
+  if (!state || !Array.isArray(state.rent)) return;
+
+  const cash = Number(state.cash) || 0;
+  const bank = Number(state.bank) || 0;
+  const active = state.rental;
+  const minutes = Number(state.rentMinutes) || 0;
+
+  $('rentMinutes').textContent = minutes;
+  $('rentalActive').classList.toggle('hidden', !active);
+
+  if (active) {
+    $('rentalBannerModel').textContent = active.label || active.model || 'Vehicle';
+    $('rentalBannerMeta').textContent = `${active.plate} · ${money(active.deposit)} deposit held`;
+  }
+
+  for (const car of state.rent) {
+    const card = document.createElement('article');
+    card.className = 'card';
+
+    const top = document.createElement('div');
+    top.className = 'card-top';
+
+    const name = document.createElement('h2');
+    name.textContent = car.label;
+
+    const fee = document.createElement('span');
+    fee.className = 'price';
+    fee.textContent = money(car.fee);
+
+    top.append(name, fee);
+
+    const terms = document.createElement('p');
+    terms.className = 'tag';
+    terms.textContent = `${minutes} min · deposit ${money(car.deposit)} refundable`;
+
+    const total = Number(car.fee) + Number(car.deposit);
+    const busy = Boolean(active);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const rentCash = document.createElement('button');
+    rentCash.className = 'buy';
+    rentCash.textContent = 'Cash';
+    rentCash.disabled = busy || cash < total;
+    rentCash.title = busy
+      ? 'Return your current rental first'
+      : cash < total ? `Needs ${money(total)} in cash` : '';
+    rentCash.onclick = () => post('rent', { model: car.model, account: 'cash' });
+
+    const rentBank = document.createElement('button');
+    rentBank.className = 'buy';
+    rentBank.textContent = 'Bank';
+    rentBank.disabled = busy || bank < total;
+    rentBank.title = busy
+      ? 'Return your current rental first'
+      : bank < total ? `Needs ${money(total)} in the bank` : '';
+    rentBank.onclick = () => post('rent', { model: car.model, account: 'bank' });
+
+    actions.append(rentCash, rentBank);
+    card.append(top, terms, actions);
     root.appendChild(card);
   }
 }
@@ -179,6 +248,15 @@ function showTestDrive(data) {
   $('tdTime').classList.toggle('low', seconds <= 10);
 }
 
+function showRental(data) {
+  $('rental').classList.remove('hidden');
+  $('rentalModel').textContent = data.label || data.model || 'Vehicle';
+
+  const seconds = Math.max(0, Number(data.remaining) || 0);
+  $('rentalTime').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  $('rentalTime').classList.toggle('low', seconds <= 60);
+}
+
 function close() {
   $('dealer').classList.add('hidden');
   post('close');
@@ -189,13 +267,15 @@ function close() {
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-    const showroom = tab.dataset.tab === 'showroom';
-    $('showroomTab').classList.toggle('hidden', !showroom);
-    $('sellTab').classList.toggle('hidden', showroom);
+    const name = tab.dataset.tab;
+    $('showroomTab').classList.toggle('hidden', name !== 'showroom');
+    $('rentTab').classList.toggle('hidden', name !== 'rent');
+    $('sellTab').classList.toggle('hidden', name !== 'sell');
   };
 });
 
 $('close').onclick = close;
+$('returnCar').onclick = () => post('returncar');
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -210,4 +290,6 @@ window.addEventListener('message', ({ data }) => {
   if (data.type === 'toast') toast(data.text, data.ok);
   if (data.type === 'testdrive') showTestDrive(data);
   if (data.type === 'testdriveEnd') $('testdrive').classList.add('hidden');
+  if (data.type === 'rental') showRental(data);
+  if (data.type === 'rentalEnd') $('rental').classList.add('hidden');
 });

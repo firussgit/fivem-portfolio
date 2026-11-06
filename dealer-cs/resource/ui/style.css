@@ -1,0 +1,348 @@
+:root {
+  --bg: rgba(16, 19, 24, .96);
+  --panel: #1a2029;
+  --panel-2: #212936;
+  --line: #2c3542;
+  --text: #e9eef5;
+  --muted: #8d99aa;
+  --gold: #ffc14d;
+  --gold-2: #ff8a3d;
+  --good: #46c07e;
+  --low: #ff6b6b;
+  --mid: #f0b44c;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  user-select: none;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- dealership panel ---------- */
+
+#dealer {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1080px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .65);
+  backdrop-filter: blur(8px);
+}
+
+#dealer header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 22px 16px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 193, 77, .07), transparent);
+}
+
+.title { flex: 1 1 auto; min-width: 0; }
+
+.kicker {
+  display: block;
+  font-size: 10px;
+  letter-spacing: .18em;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+#dealer h1 {
+  margin: 3px 0 0;
+  font-size: 21px;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wallet { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.chip strong {
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#capacityChip.full strong { color: var(--low); }
+
+#close {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#close:hover { color: var(--text); border-color: var(--gold); }
+
+nav {
+  display: flex;
+  gap: 4px;
+  padding: 10px 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  padding: 10px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+.pane {
+  padding: 18px 22px 22px;
+  overflow-y: auto;
+  min-height: 280px;
+}
+
+.lead {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.note {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 107, 107, .35);
+  border-radius: 9px;
+  background: rgba(255, 107, 107, .08);
+  color: #ffb3b3;
+  font-size: 12.5px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(160deg, var(--panel-2), var(--panel));
+}
+
+.card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.price {
+  color: var(--gold);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tag {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.actions { display: flex; gap: 7px; margin-top: 6px; }
+
+button.buy,
+button.ghost {
+  flex: 1 1 0;
+  padding: 9px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+button.ghost:hover { border-color: var(--gold); color: var(--gold); }
+
+button.buy {
+  background: linear-gradient(180deg, var(--gold), var(--gold-2));
+  color: #241a08;
+}
+
+button.buy:hover { filter: brightness(1.08); }
+
+button.buy:disabled {
+  background: var(--panel-2);
+  color: #596373;
+  border-color: var(--line);
+  cursor: not-allowed;
+  filter: none;
+}
+
+button.buy.confirm {
+  background: linear-gradient(180deg, #ff7b6b, #d94a3d);
+  color: #2a0b08;
+}
+
+button.ghost:disabled,
+button.ghost:disabled:hover {
+  color: #596373;
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+.condition {
+  height: 5px;
+  border-radius: 999px;
+  background: #121821;
+  overflow: hidden;
+}
+
+.condition span { display: block; height: 100%; }
+.condition .good { background: var(--good); }
+.condition .mid { background: var(--mid); }
+.condition .low { background: var(--low); }
+
+.empty {
+  margin: 26px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---------- test-drive HUD ---------- */
+
+#testdrive {
+  position: fixed;
+  top: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 280px;
+  padding: 13px 18px 14px;
+  text-align: center;
+  background: rgba(16, 19, 24, .92);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(6px);
+}
+
+#testdrive strong {
+  display: block;
+  margin: 3px 0 1px;
+  font-size: 16px;
+}
+
+#tdTime {
+  display: block;
+  color: var(--gold);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+#tdTime.low { color: var(--low); }
+
+#testdrive p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+/* ---------- toasts ---------- */
+
+#toasts {
+  position: fixed;
+  right: 26px;
+  bottom: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+}
+
+.toast {
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: 9px;
+  background: rgba(16, 19, 24, .96);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
+  transition: opacity .25s, transform .25s;
+}
+
+.toast.ok { border-left-color: var(--good); }
+.toast.bad { border-left-color: var(--low); }
+.toast.out { opacity: 0; transform: translateX(8px); }

@@ -2,8 +2,8 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'firuss'
-description 'Persistent vehicle garage in C#: oxmysql storage, server-validated ownership, hotwire theft state'
-version '0.2.0'
+description 'Persistent vehicle garage in C#: oxmysql storage, server-validated ownership, hotwire theft state, insurance claims and dealer delivery'
+version '0.3.0'
 
 dependency 'oxmysql'
 

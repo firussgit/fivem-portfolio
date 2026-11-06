@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Premium Deluxe Motorsport</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="dealer" class="hidden">
+    <header>
+      <div class="title">
+        <span class="kicker">VEHICLE DEALERSHIP</span>
+        <h1 id="showroom">Premium Deluxe Motorsport</h1>
+      </div>
+      <div class="wallet">
+        <span class="chip">Cash <strong id="cash">$0</strong></span>
+        <span class="chip">Bank <strong id="bank">$0</strong></span>
+        <span class="chip" id="capacityChip">Garage <strong id="capacity">0/10</strong></span>
+      </div>
+      <button id="close" aria-label="Close">&times;</button>
+    </header>
+
+    <nav>
+      <button class="tab active" data-tab="showroom">Showroom</button>
+      <button class="tab" data-tab="sell">Sell your car</button>
+    </nav>
+
+    <section id="showroomTab" class="pane">
+      <p class="lead">Every car is handed over at the dealership. Prices are fixed by the dealer.</p>
+      <p id="fullNote" class="note hidden">Your garage is full. Sell a car to make room.</p>
+      <div id="catalog" class="grid"></div>
+    </section>
+
+    <section id="sellTab" class="pane hidden">
+      <p class="lead">Trade in a stored car. The offer depends on its engine and body condition.</p>
+      <div id="owned" class="grid"></div>
+      <p id="ownedEmpty" class="empty hidden">You have no stored cars eligible for trade-in.</p>
+    </section>
+
+    <footer>
+      <span>Test drives are free and last 90 seconds.</span>
+      <span>Press ESC to leave</span>
+    </footer>
+  </main>
+
+  <section id="testdrive" class="hidden">
+    <span class="kicker">TEST DRIVE</span>
+    <strong id="tdModel">Vehicle</strong>
+    <span id="tdTime">1:30</span>
+    <p>Leave the car or run out of time to end the drive.</p>
+  </section>
+
+  <section id="toasts"></section>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -64,6 +64,10 @@ namespace Garage.Server
             // remove the live entity and its cache so the vehicle can be taken out again later.
             Exports.Add("impound", new Func<string, bool>(Impound));
 
+            // Server-only: dealer-cs has already inserted the owned row for a purchase; this
+            // takes it out through the normal path so tracking, /park, /lock and /locate work.
+            Exports.Add("deliver", new Func<int, string, bool>(Deliver));
+
             _hotwireSeconds = Math.Max(2, Math.Min(60, GetConvarInt("garage_hotwire_seconds", 8)));
             _insurancePercent = Math.Max(0, Math.Min(100, GetConvarInt("insurance_payout_percent", 50)));
             _insuranceMax = Math.Max(0, Math.Min(100000, GetConvarInt("insurance_payout_max", 2500)));
@@ -614,6 +618,56 @@ namespace Garage.Server
             foreach (var set in _out.Values) set.Remove(plate);
 
             Debug.WriteLine($"[garage] impounded [{plate}] removed from the world");
+            return true;
+        }
+
+        /// <summary>
+        /// Hands a newly bought, stored vehicle to its owner. The dealer has already inserted the
+        /// owned row; this moves it from stored to out and reuses the normal spawn path, so
+        /// ownership tracking, /park, /lock, /locate and theft behave exactly as after /takeout.
+        /// A server-only export, so a client can never hand itself a car.
+        /// </summary>
+        bool Deliver(int src, string plate)
+        {
+            plate = (plate ?? "").Trim();
+            if (plate.Length == 0) return false;
+
+            var p = Players[src];
+            if (p == null) return false;
+            string license = License(p);
+            if (license == null) return false;
+
+            Db("UPDATE player_vehicles SET state = 0 WHERE plate = ? AND owner = ? AND state = 1 AND stolen = 0",
+                new object[] { plate, license }, affected =>
+                {
+                    if (affected != 1)
+                    {
+                        Debug.WriteLine($"[garage] deliver [{plate}] refused (not stored or not {license})");
+                        return;
+                    }
+
+                    // If the buyer dropped between the request and this callback, put the car back
+                    // in the garage instead of leaving it marked "out" with nobody tracking it.
+                    if (Players[src] == null)
+                    {
+                        Db("UPDATE player_vehicles SET state = 1 WHERE plate = ? AND owner = ? AND state = 0",
+                            new object[] { plate, license }, _ => { });
+                        return;
+                    }
+
+                    Query("SELECT model, plate, engine, body, mods FROM player_vehicles WHERE plate = ? AND owner = ?",
+                        new object[] { plate, license }, rows =>
+                        {
+                            if (rows.Count != 1) return;
+                            var v = rows[0];
+                            Track(license).Add(plate);
+                            TriggerClientEvent(p, "garage:spawn", v["model"].ToString(), plate,
+                                Convert.ToInt32(v["engine"]), Convert.ToInt32(v["body"]),
+                                v["mods"] == null ? "" : v["mods"].ToString());
+                            Debug.WriteLine($"[garage] delivered [{plate}] to {license}");
+                        });
+                });
+
             return true;
         }
 

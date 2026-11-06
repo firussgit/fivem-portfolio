@@ -26,6 +26,7 @@ and answers with the new truth.
 |---|---|---|
 | [`bank-cs`](bank-cs) | C# + HTML/CSS/JS | Server-authoritative banking, ATM prop detection, NUI interface |
 | [`garage-cs`](garage-cs) | C# + MySQL | Persistent vehicle garage, ownership checks, atomic state changes, lock / engine / locate, hotwire theft and insurance claims |
+| [`dealer-cs`](dealer-cs) | C# + MySQL + NUI | Player dealership: server-priced showroom, cash/bank purchases, free test drives and condition-based trade-ins |
 | [`customs-cs`](customs-cs) | C# + MySQL + NUI | Vehicle customisation: live preview, server-priced mods saved on the owned vehicle |
 | [`fuel-cs`](fuel-cs) | C# + MySQL | Fuel per vehicle: server-validated drain, paid refuelling, persisted on owned vehicles |
 | [`phone-cs`](phone-cs) | C# + MySQL + NUI | Phone: number per player, contacts, text messages, phone banking |
@@ -66,7 +67,7 @@ and answers with the new truth.
   `removeMoney`, `addBank`, `getBalances`; `inventory-cs` exposes `addItem`, `removeItem`,
   `hasItem`, `getCount`, `canAdd`; `jobs-cs` exposes `getJob`, `getGrade`, `isOnDuty`;
   `needs-cs` exposes `getNeeds`, `addNeeds`; `dispatch-cs` exposes `createCall`, `cancelCall`,
-  `resolveFromAction`.
+  `resolveFromAction`; `garage-cs` exposes `impound`, `deliver`.
 - **Events:** `inventory-cs` raises `inventory:itemUsed` (needs-cs reacts to it);
   `garage-cs` raises `garage:vehicleSpawned` on the client (customs-cs reacts to it);
   `jobs-cs` raises `jobs:dutyChanged` and `jobs:jobChanged` on the server
@@ -79,6 +80,10 @@ and answers with the new truth.
 - **Races:** `races-cs` is deliberately standalone: routes, cars, limits and checkpoints live in
   its server code, and the server owns the clock and the checkpoint polling, so it needs
   `oxmysql` but no other portfolio resource.
+- **Dealership:** `dealer-cs` prices and validates the sale, charges `bank-cs`, inserts the owned
+  row into `player_vehicles`, then asks `garage-cs` to hand the car over through its server-only
+  `deliver` export. A trade-in pays through `bank-cs` and deletes the row only if it is still
+  stored, non-stolen and owned by the seller.
 - Resources degrade gracefully: without `jobs-cs` there's just no mechanic discount; without
   `bank-cs` a purchase aborts before anything changes.
 
@@ -87,12 +92,12 @@ and answers with the new truth.
 | Principle | Where you can see it |
 |---|---|
 | **Server-authoritative state.** Balances, stock, fuel, inventories and vehicle state live on the server; the client renders what it's told. | every resource |
-| **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch |
+| **Server-side position checks.** With OneSync the server reads the player's real position, so "must be at an ATM / shop / bay / pump / job hub / call / showroom" can't be faked. | bank, shops, customs, fuel, inventory (give nearby), jobs, dispatch, dealer |
 | **Anti-teleport checks.** A job stop, a dispatch "on scene" or a race checkpoint only counts if the server can see the player there *and* enough time has passed for a vehicle to cover the distance. | jobs activities, dispatch, races |
-| **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races |
-| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim |
+| **Server-owned clock.** A race time is measured and stored by the server from the moment the real car and seated player are verified; the client's timer is only a display. | races, dealer test drives |
+| **Atomic operations.** Check-and-change happens in one step (`UPDATE ... WHERE state = 1`, check-and-deduct), so two requests can't both win. | garage, bank, inventory, dispatch claim, dealer sell |
 | **Verify the effect, not just the request.** A revive pays only after the server re-reads the patient's health; a fine is logged only after the bank confirms the deduction; an impound only moves a vehicle that is still out. | jobs field actions |
-| **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone |
+| **All-or-nothing across resources, with a refund path.** A purchase that spans bank + inventory can't be left half done. | shops, customs, phone, dealer |
 | **Strict input validation and rate limiting.** Bounds, lengths, formats, whitelists, per-player cooldowns. | every resource |
 | **Coalesced, ordered database writes.** Dirty tracking plus a timer instead of a write per click. | inventory, fuel, needs |
 | **Loose coupling.** Resources talk through exports and events and keep working when a dependency is missing. | needs, customs, jobs |
@@ -164,6 +169,13 @@ set dispatch_pay_per_call 150         # bank bonus for a resolved dispatch call 
 set dispatch_scene_radius 40          # metres: how close a unit must be to mark on scene / resolve
 set dispatch_call_ttl_minutes 15      # calls left open this long expire
 set dispatch_call_cooldown_seconds 20 # minimum gap between a player's 911 calls
+set dealer_showroom_x -45.0           # dealership showroom position (dealer-cs)
+set dealer_showroom_y -1098.0
+set dealer_showroom_z 26.4
+set dealer_range 8                    # metres: how close a player must be to buy / sell / test drive
+set dealer_testdrive_seconds 90       # test drive limit
+set dealer_sell_min_percent 35        # trade-in offer for a wrecked car
+set dealer_sell_max_percent 60        # trade-in offer for a perfect car
 set admin_bootstrap_license "xxxxxxxx"   # first SuperAdmin (admin-cs); keep it out of git
 ```
 
@@ -213,6 +225,10 @@ are optional. "Admin" means an ACE permission (named in the last column) unless 
 | *Use* `lockpick` | inventory-cs + garage-cs | Hotwire a registered car that belongs to someone else (8 s, consumes the lockpick) | Use a lockpick from the inventory next to the car |
 | `/insurance` | garage-cs | Lists your stored cars with the estimated insurance payout | `/insurance` |
 | `/claim <vehicle id>` | garage-cs | Repairs a stored, damaged car and pays the settlement to your bank | `/claim 4` |
+| `/dealer` | dealer-cs | Opens the showroom UI at Premium Deluxe Motorsport | `/dealer` |
+| `/buycar <model> [cash\|bank]` | dealer-cs | Buys a car at the showroom (default bank) | `/buycar sultan bank` |
+| `/testdrive <model>` | dealer-cs | Free 90-second test drive from the showroom | `/testdrive comet2` |
+| `/sellcar <vehicle id>` | dealer-cs | Trades in a stored, non-stolen car; the offer is paid to your bank | `/sellcar 4` |
 | `/jobs` | jobs-cs | Lists available jobs | `/jobs` |
 | `/job` | jobs-cs | Shows your job, grade, salary and duty state | `/job` |
 | `/duty` | jobs-cs | Toggles duty (you only get paychecks on duty) | `/duty` |
@@ -276,7 +292,7 @@ Roles rank `none < mod < admin < superadmin`. You can only act on someone rankin
 
 | Key | Action |
 |---|---|
-| **E** | Interact: use an ATM, open a shop, enter a customs bay, refuel (the prompt shows when it applies) |
+| **E** | Interact: use an ATM, open a shop, enter a customs bay, refuel, browse the dealership (the prompt shows when it applies) |
 | **I** | Inventory |
 | **F1** | Phone |
 | **F2** | Dispatch console |
@@ -302,8 +318,9 @@ Keys can be rebound in the game's keyboard settings (FiveM key mappings).
 11. **Items.** Place a shop with `/setshop general`, buy water, a sandwich and a lockpick, open the inventory with **I** and drag them around. Use them and watch your hunger and thirst bars recover.
 12. **Theft.** With someone else's owned car out, stand next to it, open the inventory and use the lockpick. Eight seconds later (`garage_hotwire_seconds`) it is hotwired and `stolen`; the owner is told in chat and `/garage` shows `STOLEN`. As on-duty police, `/impound` that car: it is recovered, the flag is cleared and it is back in the owner's garage. A stolen car can't be `/park`ed.
 13. **Insurance.** Crash a car, `/park` it, then `/insurance` to see the quoted settlement and `/claim <id>` to have it repaired and the money paid to your bank. The same car can't be claimed again for 30 minutes, and a stolen car is excluded until the police recover it.
-14. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
-15. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
+14. **A dealership.** Go to Premium Deluxe Motorsport (the yellow car blip), stand on the marker and press **E**. Browse the server-priced catalogue, then try **Test drive** for a free 90-second car, or buy with **Cash** / **Bank**: the bank charge and the garage insert happen on the server, and the car is handed over through the garage's normal spawn path. Open **Sell your car** to trade in a stored car; the offer depends on its engine and body condition. The sales history is in `dealer_sales`.
+15. **Phone.** Press **F1**. Add a contact, send a text to a friend's number, and pay them from the Bank tab.
+16. **Staff.** `/setrole <id> mod`, then `/players`, `/goto` and `/adminlog`.
 
 ## Resource details
 
@@ -348,6 +365,10 @@ claim a car it doesn't own.
 - **Atomic take-out.** `UPDATE ... WHERE id = ? AND owner = ? AND state = 1` checks ownership
   *and* that the car is stored in one statement, so two simultaneous requests can never both
   spawn the same vehicle.
+- **Dealer delivery.** A server-only `deliver(src, plate)` export lets `dealer-cs` hand a freshly
+  bought, stored row to the normal spawn path. It re-checks that the row is that player's and still
+  stored, and if the buyer drops mid-delivery the row goes back to the garage instead of being
+  left "out" with nobody tracking it.
 - **Server-verified parking (OneSync).** `/park` sends only a network id and the condition.
   The server resolves the real entity, reads its plate, checks that this player took that
   plate out, and only then stores and deletes it. A stolen car can't be parked away.
@@ -377,6 +398,42 @@ claim a car it doesn't own.
 
 Requires `oxmysql`, a `mysql_connection_string` convar, and OneSync. `inventory-cs` is optional:
 without it the garage still works, but lockpicks can't start a hotwire.
+
+### dealer-cs
+
+A player-facing way to acquire and dispose of vehicles, built so the money and the car can't go
+their separate ways.
+
+- **Server-priced catalogue.** The 10 whitelisted garage models have fixed prices on the server
+  (Faggio $5,000 up to Adder $120,000). The UI can only send a model id and "cash" or "bank".
+- **At the showroom, on foot.** The server reads the player's real position (OneSync) and refuses
+  any purchase, sale or test drive outside `dealer_range` of the showroom; the client is told where
+  the showroom is, so both sides always agree.
+- **Atomic purchase with a refund path.** The server checks the 10-vehicle cap, takes the money
+  through `bank-cs` (check-and-deduct in one step), then inserts the owned row. If the insert fails
+  the charge is refunded. The new car is handed to `garage-cs` through its server-only `deliver`
+  export, which moves the row from stored to out and reuses the normal `/takeout` spawn path, so
+  `/park`, `/lock`, `/locate`, fuel, customs and theft all keep working. If the garage is
+  unavailable the car stays safely stored.
+- **Condition-based trade-ins.** Stored, non-stolen catalogue cars can be sold back. The offer is
+  `dealer_sell_min_percent` plus the remaining engine/body health share of the difference up to
+  `dealer_sell_max_percent` (35-60% by default). Payment goes to the bank, then a single
+  conditional `DELETE ... WHERE state = 1 AND stolen = 0` decides the sale; if a concurrent request
+  already took the car, the payment is reversed.
+- **Free test drives, server-timed.** The client spawns a local car with a `TEST####` plate; the
+  server verifies the real entity's plate, model and seated driver at the showroom before starting
+  the clock. Leaving the car, losing it, the time limit or a disconnect ends the drive, and the
+  server deletes the car. There is no database row, so `/park` can't keep a test car.
+- **History.** Every completed purchase and trade-in is a row in `dealer_sales` (licence, kind,
+  model, plate, amount, account). The table is created on start; see `sql/install.sql`.
+- **NUI holds no authority.** The page renders the catalogue, balances and offers; it writes user
+  data with `textContent` and posts intent through NUI callbacks. The server revalidates every
+  click, including the showroom distance.
+- **One capped garage.** The dealership enforces the same 10-vehicle cap as `garage-cs`.
+
+The showroom position and the economics are server convars (`dealer_showroom_x/y/z`,
+`dealer_range`, `dealer_testdrive_seconds`, `dealer_sell_min_percent`, `dealer_sell_max_percent`).
+Requires `oxmysql`, `bank-cs`, `garage-cs` and OneSync.
 
 ### customs-cs
 
